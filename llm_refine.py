@@ -53,6 +53,17 @@ def try_parse_json(text: str):
             return json.loads(text2)
         except Exception:
             pass
+    # 일부 LLM이 "Here is the output ..." 같은 프리텍스트 뒤에
+    # 순수 JSON 배열만 이어서 출력하는 경우를 위한 보정:
+    # 전체 텍스트에서 가장 바깥쪽 대괄호 블록만 잘라 다시 파싱 시도.
+    try:
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1 and start < end:
+            candidate = text[start : end + 1].strip()
+            return json.loads(candidate)
+    except Exception:
+        pass
     return None
 
 
@@ -107,7 +118,6 @@ def postprocess_final_topics(final_topics, refined_words_n: int):
         topic_id = item.get("topic_id", None)
         topic_name = str(item.get("topic_name", "")).strip()
         words = item.get("words", [])
-        changes = str(item.get("changes", "")).strip()
 
         if topic_id is None:
             continue
@@ -137,7 +147,6 @@ def postprocess_final_topics(final_topics, refined_words_n: int):
                 "topic_id": topic_id,
                 "topic_name": topic_name,
                 "words": cleaned_words,
-                "changes": changes,
             }
         )
 
@@ -193,18 +202,19 @@ def postprocess_schema_json(schema_json, schema_labels: List[str], refined_words
 
 
 def parse_deleted_topic_ids(delete_text: str) -> set:
+    """STEP2 DELETE 출력에서 삭제 대상 topic index 추출. '- Topic k' 또는 '- Topic k: word1, ...' 형식 모두 처리."""
     deleted = set()
-
     for line in delete_text.splitlines():
         line = line.strip()
         if not line.startswith("- Topic "):
             continue
         try:
-            idx = int(line.split("- Topic ", 1)[1].split()[0])
+            rest = line.split("- Topic ", 1)[1].strip()
+            first_token = rest.split()[0].rstrip(":")  # "5" or "5:" -> "5"
+            idx = int(first_token)
             deleted.add(idx)
         except Exception:
             pass
-
     return deleted
 
 
@@ -294,7 +304,7 @@ Delete a topic only if:
 - it has no clear semantic meaning,
 - it is a weak near-duplicate of another topic.
 
-Return the delete result and short explanation.
+Return the delete result and short explanation. For each deleted topic, also echo its topic words on the same line for easier post-processing.
 
 Rules:
 - Be conservative.
@@ -304,8 +314,8 @@ Rules:
 Return plain text only in this exact format:
 
 DELETE:
-- Topic k
-- Topic m
+- Topic k: <word1, word2, ...>
+- Topic m: <word1, word2, ...>
 or
 - None
 
@@ -345,7 +355,7 @@ For each topic:
 2. remove unrelated or weak words,
 3. keep exactly one refined topic per input topic,
 4. assign the topic to the most appropriate schema,
-5. return the refinement result and short change note.
+5. return the refinement result.
 
 Rules:
 - The number of topics is exactly {surviving_topics_n}; do not add or remove any topics.
@@ -365,8 +375,7 @@ JSON format:
     "topic_id": 0,
     "topic_name": "short topic name",
     "words": ["w1", "w2", "w3", "w4", "w5"],
-    "schema": "Schema Label",
-    "changes": "short explanation"
+    "schema": "Schema Label"
   }}
 ]
 """
@@ -390,6 +399,20 @@ def call_llm(
     )
     model_inputs = {k: v.to(device) for k, v in model_inputs.items()}
 
+    # HF 경고("Both `max_new_tokens` and `max_length`...") 방지를 위해
+    # 모델/생성 config에 남아 있을 수 있는 max_length를 명시적으로 None으로 초기화한 뒤
+    # generate에는 max_new_tokens만 전달한다.
+    try:
+        if hasattr(model, "generation_config") and getattr(model.generation_config, "max_length", None) is not None:
+            model.generation_config.max_length = None
+    except Exception:
+        pass
+    try:
+        if hasattr(model, "config") and getattr(model.config, "max_length", None) is not None:
+            model.config.max_length = None
+    except Exception:
+        pass
+
     outputs = model.generate(
         **model_inputs,
         max_new_tokens=max_new_tokens,
@@ -397,34 +420,6 @@ def call_llm(
         pad_token_id=tokenizer.pad_token_id,
     )
     return extract_assistant_new_text(tokenizer, outputs, model_inputs)
-
-def parse_deleted_topic_ids(delete_text: str) -> set:
-    deleted = set()
-    for line in delete_text.splitlines():
-        line = line.strip()
-        if not line.startswith("- Topic "):
-            continue
-        try:
-            idx = int(line.split("- Topic ", 1)[1].split()[0])
-            deleted.add(idx)
-        except Exception:
-            pass
-    return deleted
-
-def filter_surviving_topics(topic_words: List[List[str]], delete_text: str) -> List[Dict[str, Any]]:
-    deleted_ids = parse_deleted_topic_ids(delete_text)
-    surviving = []
-    for i, words in enumerate(topic_words):
-        if i in deleted_ids:
-            continue
-        surviving.append({"topic_id": i, "words": words})
-    return surviving
-
-def format_surviving_topics(surviving_topics: List[Dict[str, Any]]) -> str:
-    lines = []
-    for item in surviving_topics:
-        lines.append(f"Topic {item['topic_id']}: {', '.join(item['words'])}")
-    return "\n".join(lines)
 
 def postprocess_final_topics(final_topics, refined_words_n: int):
     if not isinstance(final_topics, list):
@@ -440,7 +435,6 @@ def postprocess_final_topics(final_topics, refined_words_n: int):
         topic_name = str(item.get("topic_name", "")).strip()
         words = item.get("words", [])
         schema = str(item.get("schema", "")).strip()
-        changes = str(item.get("changes", "")).strip()
 
         if topic_id is None or not topic_name or not isinstance(words, list) or not schema:
             continue
@@ -467,7 +461,6 @@ def postprocess_final_topics(final_topics, refined_words_n: int):
                 "topic_name": topic_name,
                 "words": cleaned_words,
                 "schema": schema,
-                "changes": changes,
             }
         )
 
@@ -546,7 +539,7 @@ def run_llm_four_step_schema_pipeline(
     refined_words_n: int = DEFAULT_REFINED_WORDS_N,
     max_new_tokens_step1: int = 1200,
     max_new_tokens_step2: int = 1500,
-    max_new_tokens_step3: int = 4096,
+    max_new_tokens_step3: int = 4096,  # Llama 8B 등 많은 모델이 최대 생성 4096; 잘리면 --max_new_tokens_step3 8192 등으로 올리기(모델이 지원할 때)
     out_dir: str = "results/llm_refine",
     run_name: Optional[str] = None,
     device: str = "cuda",
@@ -668,7 +661,8 @@ if __name__ == "__main__":
     parser.add_argument("--refined_words_n", type=int, default=DEFAULT_REFINED_WORDS_N)
     parser.add_argument("--max_new_tokens_step1", type=int, default=1200)
     parser.add_argument("--max_new_tokens_step2", type=int, default=1500)
-    parser.add_argument("--max_new_tokens_step3", type=int, default=4096)
+    parser.add_argument("--max_new_tokens_step3", type=int, default=4096,
+                        help="STEP3 JSON 최대 생성 토큰 수. Llama 8B 등은 4096 제한; 잘리면 모델이 허용하는 범위에서 올리기")
     parser.add_argument("--out_dir", type=str, default="results/llm_refine")
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda")

@@ -1,0 +1,274 @@
+Here is the output in JSON format:
+
+[
+  {
+    "topic_id": 0,
+    "topic_name": "Clipper",
+    "words": ["clipper", "xr", "xt", "dx", "char", "dec", "ar", "irq", "isa", "int", "lc", "centris", "ra", "bd", "ati"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 1,
+    "topic_name": "Email",
+    "words": ["email", "list", "send", "address", "mail", "group", "info", "message", "advance", "posted", "reply", "net", "posting", "information", "mailing"],
+    "schema": "Communication"
+  },
+  {
+    "topic_id": 2,
+    "topic_name": "Question",
+    "words": ["question", "mr", "answer", "dont", "read", "response", "appreciated", "ask", "suggestion", "issue", "comment", "posting", "nt", "dr", "regard"],
+    "schema": "Information"
+  },
+  {
+    "topic_id": 3,
+    "topic_name": "Performance",
+    "words": ["difference", "better", "performance", "level", "quality", "condition", "good", "rate", "higher", "mean", "low", "test", "average", "normal", "result"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 4,
+    "topic_name": "Sale",
+    "words": ["power", "price", "sale", "sell", "tape", "cost", "box", "new", "used", "shipping", "cd", "original", "buy", "company", "cable"],
+    "schema": "Business"
+  },
+  {
+    "topic_id": 5,
+    "topic_name": "Light",
+    "words": ["light", "flame", "ground", "head", "hour", "leaf", "water", "battery", "gas", "thread", "hole", "heat", "hot", "tank", "wire"],
+    "schema": "Science"
+  },
+  {
+    "topic_id": 6,
+    "topic_name": "Gun",
+    "words": ["gun", "law", "right", "weapon", "state", "firearm", "court", "crime", "death", "police", "criminal", "people", "kill", "case", "use"],
+    "schema": "Politics"
+  },
+  {
+    "topic_id": 7,
+    "topic_name": "Like",
+    "words": ["like", "know", "way", "time", "make", "want", "come", "need", "think", "let", "case", "going", "best", "right", "really"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 8,
+    "topic_name": "Program",
+    "words": ["file", "program", "source", "application", "information", "code", "entry", "section", "sun", "contact", "available", "use", "write", "include", "date"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 9,
+    "topic_name": "Encryption",
+    "words": ["key", "encryption", "chip", "use", "phone", "data", "government", "security", "information", "internet", "algorithm", "technology", "public", "communication", "secret"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 10,
+    "topic_name": "Work",
+    "words": ["work", "need", "use", "thanks", "help", "make", "try", "fine", "using", "build", "save", "convert", "working", "want", "extra"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 11,
+    "topic_name": "Monitor",
+    "words": ["monitor", "printer", "color", "font", "screen", "mode", "apple", "hp", "print", "copy", "mm", "vga", "laser", "detector", "product"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 12,
+    "topic_name": "Ftp",
+    "words": ["ftp", "user", "widget", "resource", "site", "faq", "directory", "software", "unix", "library", "archive", "anonymous", "database", "computer", "mit"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 13,
+    "topic_name": "Article",
+    "words": ["article", "read", "subject", "note", "reference", "discussion", "paper", "issue", "particular", "reading", "topic", "source", "purpose", "quote", "description"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 14,
+    "topic_name": "People",
+    "words": ["people", "state", "job", "money", "plan", "government", "tax", "support", "work", "vote", "party", "time", "going", "think", "program"],
+    "schema": "Politics"
+  },
+  {
+    "topic_id": 16,
+    "topic_name": "Armenian",
+    "words": ["armenian", "war", "turkish", "israel", "arab", "jewish", "jew", "turkey", "azerjiani", "russian", "ottoman", "muslim", "azerbaijan", "population", "army"],
+    "schema": "Politics"
+  },
+  {
+    "topic_id": 17,
+    "topic_name": "Time",
+    "words": ["year", "day", "time", "post", "ago", "month", "week", "second", "long", "couple", "got", "end", "start", "started", "took"],
+    "schema": "Information"
+  },
+  {
+    "topic_id": 18,
+    "topic_name": "Car",
+    "words": ["car", "bike", "engine", "brake", "wheel", "tire", "mile", "speed", "road", "ride", "motorcycle", "driver", "oil", "riding", "rear"],
+    "schema": "Transportation"
+  },
+  {
+    "topic_id": 19,
+    "topic_name": "Say",
+    "words": ["say", "people", "ill", "think", "mean", "know", "thing", "way", "word", "yes", "like", "really", "feel", "course", "talking"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 20,
+    "topic_name": "Good",
+    "words": ["good", "like", "thanks", "sound", "pretty", "quite", "picture", "little", "great", "unfortunately", "excellent", "lot", "actually", "yes", "poster"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 21,
+    "topic_name": "Problem",
+    "words": ["problem", "time", "got", "tried", "help", "work", "friend", "recently", "try", "like", "experience", "trying", "idea", "solution", "bought"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 22,
+    "topic_name": "Team",
+    "words": ["pp", "st", "ny", "bos", "la", "nj", "van", "det", "buf", "nyr", "pittsburgh", "mike", "ranger", "pit", "gm"],
+    "schema": "Sports"
+  },
+  {
+    "topic_id": 24,
+    "topic_name": "God",
+    "words": ["god", "jesus", "christ", "christian", "church", "bible", "lord", "scripture", "love", "sin", "homosexual", "faith", "heaven", "christianity", "holy"],
+    "schema": "Religion"
+  },
+  {
+    "topic_id": 25,
+    "topic_name": "Drive",
+    "words": ["drive", "card", "disk", "mb", "driver", "scsi", "port", "board", "hard", "modem", "ram", "speed", "mac", "mhz", "controller"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 26,
+    "topic_name": "Point",
+    "words": ["point", "people", "right", "claim", "fact", "believe", "agree", "reason", "want", "let", "opinion", "make", "tell", "live", "saying"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 27,
+    "topic_name": "Space",
+    "words": ["space", "earth", "spacecraft", "orbit", "launch", "satellite", "solar", "nasa", "mission", "surface", "moon", "planet", "shuttle", "lunar", "sun"],
+    "schema": "Science"
+  },
+  {
+    "topic_id": 28,
+    "topic_name": "Image",
+    "words": ["image", "file", "display", "format", "data", "jpeg", "color", "output", "motif", "gif", "input", "processing", "pixel", "code", "object"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 29,
+    "topic_name": "Like",
+    "words": ["like", "look", "course", "best", "make", "offer", "example", "good", "high", "seen", "better", "asking", "far", "small", "worth"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 30,
+    "topic_name": "Religion",
+    "words": ["religion", "belief", "people", "think", "god", "believe", "atheist", "moral", "religious", "true", "say", "life", "human", "christian", "person"],
+    "schema": "Religion"
+  },
+  {
+    "topic_id": 31,
+    "topic_name": "Number",
+    "words": ["new", "number", "david", "based", "currently", "add", "work", "class", "network", "medium", "used", "use", "added", "base", "addition"],
+    "schema": "Math"
+  },
+  {
+    "topic_id": 32,
+    "topic_name": "Window",
+    "words": ["window", "bit", "run", "set", "using", "server", "version", "error", "running", "machine", "manager", "command", "client", "setting", "mouse"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 33,
+    "topic_name": "Disease",
+    "words": ["disease", "health", "infection", "medical", "patient", "drug", "study", "doctor", "treatment", "vitamin", "cancer", "medicine", "food", "vaccine", "clinical"],
+    "schema": "Health"
+  },
+  {
+    "topic_id": 34,
+    "topic_name": "Said",
+    "words": ["said", "people", "went", "away", "child", "came", "told", "door", "woman", "going", "saw", "got", "mother", "time", "know"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 35,
+    "topic_name": "Control",
+    "words": ["control", "power", "hand", "make", "right", "rest", "way", "stop", "want", "turn", "supposed", "hold", "really", "fast", "left"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 36,
+    "topic_name": "University",
+    "words": ["university", "information", "conference", "national", "group", "report", "san", "research", "office", "american", "organization", "institute", "center", "washington", "service"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 38,
+    "topic_name": "Year",
+    "words": ["new", "year", "area", "world", "time", "called", "number", "place", "including", "following", "large", "state", "city", "general", "near"],
+    "schema": "Information"
+  },
+  {
+    "topic_id": 40,
+    "topic_name": "Time",
+    "words": ["time", "make", "probably", "unless", "way", "actually", "cause", "local", "possible", "mean", "likely", "change", "free", "able", "effect"],
+    "schema": "Information"
+  },
+  {
+    "topic_id": 41,
+    "topic_name": "Book",
+    "words": ["book", "new", "st", "appears", "copy", "art", "black", "cover", "edition", "man", "ed", "john", "comic", "story", "jim"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 42,
+    "topic_name": "Think",
+    "words": ["think", "president", "said", "fbi", "know", "general", "today", "going", "myers", "action", "koresh", "stephanopoulos", "situation", "house", "believe"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 43,
+    "topic_name": "Like",
+    "words": ["like", "interested", "thing", "know", "think", "idea", "looking", "guy", "sort", "good", "want", "thought", "lot", "mind", "really"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 44,
+    "topic_name": "Argument",
+    "words": ["argument", "evidence", "fact", "conclusion", "exist", "true", "prove", "theory", "example", "context", "logic", "different", "assumption", "proof", "exists"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 45,
+    "topic_name": "Game",
+    "words": ["game", "team", "play", "player", "season", "hockey", "league", "hit", "win", "year", "time", "nhl", "fan", "period", "baseball"],
+    "schema": "Sports"
+  },
+  {
+    "topic_id": 46,
+    "topic_name": "Line",
+    "words": ["line", "number", "case", "set", "following", "rule", "used", "current", "value", "check", "use", "order", "type", "called", "return"],
+    "schema": "Math"
+  },
+  {
+    "topic_id": 48,
+    "topic_name": "Like",
+    "words": ["like", "want", "thing", "know", "come", "look", "think", "heard", "real", "good", "people", "lot", "seen", "far", "better"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 49,
+    "topic_name": "Available",
+    "words": ["available", "support", "graphic", "software", "package", "version", "includes", "feature", "computer", "model", "standard", "use", "design", "free", "pc"],
+    "schema": "Technology"
+  }
+]
