@@ -60,12 +60,15 @@ def run_evaluation(beta, theta_train, theta_test, train_bow, train_labels, test_
     else:
         beta_np = np.asarray(beta)
 
+    print("\n[Evaluation] Starting topic coherence / diversity / clustering metrics...")
     tc = get_topic_coherence(
         beta_np, train_bow, vocab,
         topk=topk_words, n_docs_for_coherence=n_docs_coherence,
         root_dir=root_dir,
     )
+    print("[Evaluation] Topic coherence finished.")
     td = get_topic_diversity(beta_np, topk=25)
+    print("[Evaluation] Topic diversity finished.")
 
     # Clustering on train (표준은 test로도 보고)
     purity_train, nmi_train = compute_purity_nmi(
@@ -80,6 +83,7 @@ def run_evaluation(beta, theta_train, theta_test, train_bow, train_labels, test_
     print("Purity (train/test avg):", round(purity, 4))
     print("NMI (train/test avg):", round(nmi, 4))
     print("PN (Purity+NMI)/2:", round(pn, 4))
+    print("[Evaluation] All metrics finished.\n")
 
     return {
         "topic_coherence_cv": tc,

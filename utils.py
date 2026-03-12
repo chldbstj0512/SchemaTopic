@@ -3,11 +3,25 @@ topic extraction 및 공통 helper 함수
 - get_topics, get_topic_coherence (C_V), get_topic_diversity, nearest_neighbors
 - Palmetto C_V (run_palmetto_cv) when jar + wikipedia_bd available
 """
+import json
 import os
 import subprocess
 import tempfile
 import numpy as np
 import torch
+
+try:
+    from tqdm import tqdm
+except ImportError:
+    tqdm = None
+
+
+def _progress(iterable, total=None, desc=None):
+    if tqdm is None:
+        if desc:
+            print(desc)
+        return iterable
+    return tqdm(iterable, total=total, desc=desc, leave=False)
 
 
 def get_topics(beta, vocab, topk=10):
@@ -36,7 +50,8 @@ def _bow_to_texts(bow, vocab, max_docs=None):
     if max_docs is not None:
         N = min(N, max_docs)
     texts = []
-    for i in range(N):
+    iterator = _progress(range(N), total=N, desc="Building texts for C_V")
+    for i in iterator:
         row = bow[i]
         tokens = []
         for v in range(V):
@@ -99,7 +114,13 @@ def run_palmetto_cv(root_dir, topics, temp_folder=None, timeout_per_topic=90, to
     out_dir = temp_folder or os.path.join(root_dir, "temp_tc_palmetto")
     os.makedirs(out_dir, exist_ok=True)
     tcs = []
-    for i, words in enumerate(topics):
+    print("Computing topic coherence with Palmetto for {} topics...".format(len(topics)))
+    topic_iter = _progress(
+        enumerate(topics),
+        total=len(topics),
+        desc="Palmetto C_V",
+    )
+    for i, words in topic_iter:
         line = " ".join(words[:topk]) if isinstance(words, (list, tuple)) else words
         if isinstance(line, str) and not line.strip():
             continue
@@ -133,6 +154,7 @@ def get_topic_coherence(beta, training_set, vocabulary, topk=10, n_docs_for_cohe
         beta = beta.detach().cpu().numpy()
     beta = np.asarray(beta)
     topics = get_topics(beta, vocabulary, topk=topk)
+    print("Preparing topic coherence evaluation for {} topics...".format(len(topics)))
 
     if root_dir:
         tc = run_palmetto_cv(root_dir, topics, topk=topk)
@@ -146,8 +168,14 @@ def get_topic_coherence(beta, training_set, vocabulary, topk=10, n_docs_for_cohe
         print("gensim not installed; skipping C_V coherence.")
         return 0.0
 
+    print(
+        "Palmetto unavailable; falling back to gensim C_V on up to {} documents.".format(
+            n_docs_for_coherence,
+        )
+    )
     texts = _bow_to_texts(training_set, vocabulary, max_docs=n_docs_for_coherence)
     try:
+        print("Running gensim CoherenceModel...")
         cm = CoherenceModel(topics=topics, texts=texts, coherence="c_v")
         score = cm.get_coherence()
     except Exception as e:
@@ -182,3 +210,84 @@ def nearest_neighbors(model_gensim, word, topn=10):
         return [w for w, _ in model_gensim.wv.most_similar(word, topn=topn)]
     except Exception:
         return []
+
+
+def load_anchor_words_from_llm_words_file(path):
+    """
+    Load topic-wise anchor words from a topic-word text file.
+
+    Expected format:
+        Topic 0: word1 word2 word3
+        Topic 1: wordA wordB
+    """
+    topics = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                topics.append([])
+                continue
+            if line.lower().startswith("topic ") and ":" in line:
+                line = line.split(":", 1)[1].strip()
+            topics.append(line.split())
+    return topics
+
+
+def load_anchor_words_from_step3_json(path):
+    """
+    Load topic-wise anchor words from the refine JSON output.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, list):
+        raise ValueError("step3_json must be a list of topic dicts.")
+
+    topics_dict = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        tid = item.get("topic_id", None)
+        words = item.get("words", None)
+        if tid is None or not isinstance(words, list):
+            continue
+        topics_dict[int(tid)] = [str(w).strip() for w in words if str(w).strip()]
+
+    if not topics_dict:
+        return []
+
+    max_tid = max(topics_dict.keys())
+    topics = []
+    for tid in range(max_tid + 1):
+        topics.append(topics_dict.get(tid, []))
+    return topics
+
+
+def build_anchor_indices(anchor_words_per_topic, vocab):
+    """
+    Map anchor words to vocabulary indices.
+    """
+    vocab_to_idx = {w: i for i, w in enumerate(vocab)}
+    anchor_indices_per_topic = []
+
+    for words in anchor_words_per_topic:
+        indices = []
+        for w in words:
+            idx = vocab_to_idx.get(w)
+            if idx is not None:
+                indices.append(idx)
+        anchor_indices_per_topic.append(indices)
+
+    return anchor_indices_per_topic
+
+
+def summarize_anchor_coverage(anchor_indices_per_topic):
+    """
+    Return simple coverage stats for anchor words.
+    """
+    num_topics = len(anchor_indices_per_topic)
+    non_empty = sum(1 for idxs in anchor_indices_per_topic if len(idxs) > 0)
+    return {
+        "num_topics": num_topics,
+        "num_topics_with_anchors": non_empty,
+    }

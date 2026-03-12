@@ -1,0 +1,632 @@
+{
+  "schema": [
+    {
+      "label": "Technology",
+      "topics": [
+        {
+          "topic_id": 0,
+          "topic_name": "Computer Hardware",
+          "words": [
+            "clipper",
+            "irq",
+            "isa",
+            "centris",
+            "ati"
+          ]
+        },
+        {
+          "topic_id": 8,
+          "topic_name": "Software Code",
+          "words": [
+            "file",
+            "program",
+            "source",
+            "application",
+            "information",
+            "code",
+            "entry",
+            "section",
+            "sun",
+            "contact",
+            "available",
+            "use",
+            "write",
+            "include",
+            "date"
+          ]
+        },
+        {
+          "topic_id": 9,
+          "topic_name": "Data Security",
+          "words": [
+            "key",
+            "encryption",
+            "chip",
+            "use",
+            "phone",
+            "data",
+            "government",
+            "security",
+            "information",
+            "internet",
+            "algorithm",
+            "technology",
+            "public",
+            "communication",
+            "secret"
+          ]
+        },
+        {
+          "topic_id": 11,
+          "topic_name": "Printer Monitor",
+          "words": [
+            "monitor",
+            "printer",
+            "color",
+            "font",
+            "screen",
+            "mode",
+            "apple",
+            "hp",
+            "print",
+            "copy",
+            "mm",
+            "vga",
+            "laser",
+            "detector",
+            "product"
+          ]
+        },
+        {
+          "topic_id": 12,
+          "topic_name": "Unix Resource",
+          "words": [
+            "ftp",
+            "user",
+            "widget",
+            "resource",
+            "site",
+            "faq",
+            "directory",
+            "software",
+            "unix",
+            "library",
+            "archive",
+            "anonymous",
+            "database",
+            "computer",
+            "mit"
+          ]
+        },
+        {
+          "topic_id": 18,
+          "topic_name": "Car Bike",
+          "words": [
+            "car",
+            "bike",
+            "engine",
+            "brake",
+            "wheel",
+            "tire",
+            "mile",
+            "speed",
+            "road",
+            "ride",
+            "motorcycle",
+            "driver",
+            "oil",
+            "riding",
+            "rear"
+          ]
+        },
+        {
+          "topic_id": 25,
+          "topic_name": "Computer Drive",
+          "words": [
+            "drive",
+            "card",
+            "disk",
+            "mb",
+            "driver",
+            "scsi",
+            "port",
+            "board",
+            "hard",
+            "modem",
+            "ram",
+            "speed",
+            "mac",
+            "mhz",
+            "controller"
+          ]
+        },
+        {
+          "topic_id": 28,
+          "topic_name": "Image File",
+          "words": [
+            "image",
+            "file",
+            "display",
+            "format",
+            "data",
+            "jpeg",
+            "color",
+            "output",
+            "motif",
+            "gif",
+            "input",
+            "processing",
+            "pixel",
+            "code",
+            "object"
+          ]
+        },
+        {
+          "topic_id": 32,
+          "topic_name": "Window Server",
+          "words": [
+            "window",
+            "bit",
+            "run",
+            "set",
+            "using",
+            "server",
+            "version",
+            "error",
+            "running",
+            "machine",
+            "manager",
+            "command",
+            "client",
+            "setting",
+            "mouse"
+          ]
+        },
+        {
+          "topic_id": 49,
+          "topic_name": "Available Support",
+          "words": [
+            "available",
+            "support",
+            "graphic",
+            "software",
+            "package",
+            "version",
+            "includes",
+            "feature",
+            "computer",
+            "model",
+            "standard",
+            "use",
+            "design",
+            "free",
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Communication",
+      "topics": [
+        {
+          "topic_id": 1,
+          "topic_name": "Email List",
+          "words": [
+            "email",
+            "list",
+            "send",
+            "address",
+            "mail",
+            "group",
+            "info",
+            "message",
+            "posting"
+          ]
+        },
+        {
+          "topic_id": 2,
+          "topic_name": "Question Answer",
+          "words": [
+            "question",
+            "answer",
+            "ask",
+            "suggestion",
+            "issue",
+            "comment",
+            "posting"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Business",
+      "topics": [
+        {
+          "topic_id": 3,
+          "topic_name": "Performance Level",
+          "words": [
+            "difference",
+            "better",
+            "performance",
+            "level",
+            "quality",
+            "condition",
+            "good",
+            "rate",
+            "higher",
+            "mean",
+            "low",
+            "test",
+            "average",
+            "normal",
+            "result"
+          ]
+        },
+        {
+          "topic_id": 4,
+          "topic_name": "Product Price",
+          "words": [
+            "price",
+            "sale",
+            "sell",
+            "cost",
+            "box",
+            "new",
+            "used",
+            "shipping",
+            "cd",
+            "original",
+            "buy",
+            "company",
+            "cable"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Science",
+      "topics": [
+        {
+          "topic_id": 5,
+          "topic_name": "Light Source",
+          "words": [
+            "light",
+            "flame",
+            "ground",
+            "head",
+            "hour",
+            "leaf",
+            "water",
+            "battery",
+            "gas",
+            "thread",
+            "hole",
+            "heat",
+            "hot",
+            "tank",
+            "wire"
+          ]
+        },
+        {
+          "topic_id": 27,
+          "topic_name": "Space Mission",
+          "words": [
+            "space",
+            "earth",
+            "spacecraft",
+            "orbit",
+            "launch",
+            "satellite",
+            "solar",
+            "nasa",
+            "mission",
+            "surface",
+            "moon",
+            "planet",
+            "shuttle",
+            "lunar",
+            "sun"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Politics",
+      "topics": [
+        {
+          "topic_id": 6,
+          "topic_name": "Gun Law",
+          "words": [
+            "gun",
+            "law",
+            "right",
+            "weapon",
+            "state",
+            "firearm",
+            "court",
+            "crime",
+            "death",
+            "police",
+            "criminal",
+            "people",
+            "kill",
+            "case",
+            "use"
+          ]
+        },
+        {
+          "topic_id": 14,
+          "topic_name": "Government Job",
+          "words": [
+            "people",
+            "state",
+            "job",
+            "money",
+            "plan",
+            "government",
+            "tax",
+            "support",
+            "work",
+            "vote",
+            "party",
+            "time",
+            "going",
+            "think",
+            "program"
+          ]
+        },
+        {
+          "topic_id": 16,
+          "topic_name": "Armenian War",
+          "words": [
+            "armenian",
+            "war",
+            "turkish",
+            "israel",
+            "arab",
+            "jewish",
+            "jew",
+            "turkey",
+            "azerjiani",
+            "russian",
+            "ottoman",
+            "muslim",
+            "azerbaijan",
+            "population",
+            "army"
+          ]
+        },
+        {
+          "topic_id": 42,
+          "topic_name": "President Action",
+          "words": [
+            "think",
+            "president",
+            "said",
+            "fbi",
+            "know",
+            "general",
+            "today",
+            "going",
+            "myers",
+            "action",
+            "koresh",
+            "stephanopoulos",
+            "situation",
+            "house",
+            "believe"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Education",
+      "topics": [
+        {
+          "topic_id": 13,
+          "topic_name": "Article Read",
+          "words": [
+            "article",
+            "read",
+            "subject",
+            "note",
+            "reference",
+            "discussion",
+            "paper",
+            "issue",
+            "particular",
+            "reading",
+            "topic",
+            "source",
+            "purpose",
+            "quote",
+            "description"
+          ]
+        },
+        {
+          "topic_id": 26,
+          "topic_name": "Point Claim",
+          "words": [
+            "point",
+            "people",
+            "right",
+            "claim",
+            "fact",
+            "believe",
+            "agree",
+            "reason",
+            "want",
+            "let",
+            "opinion",
+            "make",
+            "tell",
+            "live",
+            "saying"
+          ]
+        },
+        {
+          "topic_id": 36,
+          "topic_name": "University Research",
+          "words": [
+            "university",
+            "information",
+            "conference",
+            "national",
+            "group",
+            "report",
+            "san",
+            "research",
+            "office",
+            "american",
+            "organization",
+            "institute",
+            "center",
+            "washington",
+            "service"
+          ]
+        },
+        {
+          "topic_id": 41,
+          "topic_name": "Book Copy",
+          "words": [
+            "book",
+            "new",
+            "st",
+            "appears",
+            "copy",
+            "art",
+            "black",
+            "cover",
+            "edition",
+            "man",
+            "ed",
+            "john",
+            "comic",
+            "story",
+            "jim"
+          ]
+        },
+        {
+          "topic_id": 44,
+          "topic_name": "Argument Evidence",
+          "words": [
+            "argument",
+            "evidence",
+            "fact",
+            "conclusion",
+            "exist",
+            "true",
+            "prove",
+            "theory",
+            "example",
+            "context",
+            "logic",
+            "different",
+            "assumption",
+            "proof",
+            "exists"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Religion",
+      "topics": [
+        {
+          "topic_id": 24,
+          "topic_name": "Christian Faith",
+          "words": [
+            "god",
+            "jesus",
+            "christ",
+            "christian",
+            "church",
+            "bible",
+            "lord",
+            "scripture",
+            "love",
+            "sin",
+            "homosexual",
+            "faith",
+            "heaven",
+            "christianity",
+            "holy"
+          ]
+        },
+        {
+          "topic_id": 30,
+          "topic_name": "Religion Belief",
+          "words": [
+            "religion",
+            "belief",
+            "people",
+            "think",
+            "god",
+            "believe",
+            "atheist",
+            "moral",
+            "religious",
+            "true",
+            "say",
+            "life",
+            "human",
+            "christian",
+            "person"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Health",
+      "topics": [
+        {
+          "topic_id": 33,
+          "topic_name": "Disease Health",
+          "words": [
+            "disease",
+            "health",
+            "infection",
+            "medical",
+            "patient",
+            "drug",
+            "study",
+            "doctor",
+            "treatment",
+            "vitamin",
+            "cancer",
+            "medicine",
+            "food",
+            "vaccine",
+            "clinical"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Sports",
+      "topics": [
+        {
+          "topic_id": 45,
+          "topic_name": "Game Team",
+          "words": [
+            "game",
+            "team",
+            "play",
+            "player",
+            "season",
+            "hockey",
+            "league",
+            "hit",
+            "win",
+            "year",
+            "time",
+            "nhl",
+            "fan",
+            "period",
+            "baseball"
+          ]
+        }
+      ]
+    }
+  ]
+}

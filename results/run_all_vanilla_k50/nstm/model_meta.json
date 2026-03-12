@@ -1,0 +1,50 @@
+{
+  "model_name": "nstm",
+  "model_kwargs": {
+    "num_topics": 50,
+    "vocab_size": 13925,
+    "t_hidden_size": 500,
+    "rho_size": 300,
+    "emsize": 300,
+    "theta_act": "relu",
+    "train_embeddings": false,
+    "enc_drop": 0.0
+  },
+  "training_args": {
+    "data_dir": "datasets/20News",
+    "model": "nstm",
+    "epochs": 250,
+    "num_topics": 50,
+    "batch_size": 500,
+    "eval_batch_size": 256,
+    "lr": 0.001,
+    "wdecay": 1.2e-06,
+    "optimizer": "adam",
+    "clip": 1.0,
+    "log_interval": 10,
+    "theta_act": "relu",
+    "t_hidden_size": 500,
+    "enc_drop": 0.0,
+    "bow_norm": true,
+    "topk_words": 15,
+    "out_dir": "results/run_all_vanilla_k50/nstm",
+    "seed": 42,
+    "patience": 30,
+    "output_suffix": null,
+    "anchor_words_file": null,
+    "anchor_topics_json": null,
+    "lambda_anchor": 0.0,
+    "num_docs_train": 11778,
+    "num_docs_test": 2944,
+    "num_docs_valid": 0,
+    "num_words": 15
+  },
+  "metrics": {
+    "topic_coherence_cv": 0.42990740000000005,
+    "topic_diversity": 0.2536,
+    "purity": 0.36681607358413254,
+    "nmi": 0.352650119555291,
+    "PN": 0.35973309656971175
+  },
+  "checkpoint_path": "results/run_all_vanilla_k50/nstm/model.pt"
+}
