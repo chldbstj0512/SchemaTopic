@@ -22,6 +22,44 @@ def filter_noise_words(words: List[str]) -> List[str]:
     return [w for w in words if isinstance(w, str) and len(w.strip()) >= _MIN_WORD_LEN]
 
 
+def remove_overlapping_words_across_topics(topics: List[Dict[str, Any]], min_words_after: int = 2) -> None:
+    """토픽 간 공통 단어 제거. 2개 이상 토픽에 나온 단어는 삭제 (in-place).
+    단, 제거 후 단어가 min_words_after 미만이 되는 토픽에서는 해당 단어를 유지 (빈 토픽 방지)."""
+    if not topics:
+        return
+    word_to_topic_indices: Dict[str, set] = {}
+    for i, t in enumerate(topics):
+        if not isinstance(t, dict):
+            continue
+        words = t.get("words", [])
+        if not isinstance(words, list):
+            continue
+        seen_in_this_topic = set()
+        for w in words:
+            w = str(w).strip()
+            if not w:
+                continue
+            wl = w.lower()
+            if wl in seen_in_this_topic:
+                continue
+            seen_in_this_topic.add(wl)
+            if wl not in word_to_topic_indices:
+                word_to_topic_indices[wl] = set()
+            word_to_topic_indices[wl].add(i)
+    overlapping = {w for w, indices in word_to_topic_indices.items() if len(indices) >= 2}
+    for t in topics:
+        if not isinstance(t, dict):
+            continue
+        words = t.get("words", [])
+        if not isinstance(words, list):
+            continue
+        filtered = [w for w in words if str(w).strip().lower() not in overlapping]
+        if len(filtered) < min_words_after and len(words) > len(filtered):
+            t["words"] = words
+        else:
+            t["words"] = filtered
+
+
 def load_topic_words_from_file(path: str) -> List[List[str]]:
     topic_words = []
     with open(path, "r", encoding="utf-8") as f:
@@ -278,24 +316,30 @@ def build_schema_prompt(topic_words: List[List[str]]) -> List[Dict[str, str]]:
 
     system = (
         "You are an expert in topic modeling. "
-        "Think step by step internally, but do not reveal chain-of-thought. "
-        "Use only the given topic words. "
-        "Do not invent unsupported meanings."
+        "Design a schema for the full topic set using only the given topic words."
     )
 
     user = f"""
 Topics:
 {topics_text}
 
-Task: Partition topics into schema labels. Criterion: one line. Schema: one label per line.
+Task:
+- Find one semantic criterion for organizing the topics.
+- Propose high-level schema labels for the full topic set.
 
-Format:
+Rules:
+- Use broad category labels.
+- Do not make topic-specific labels, make schema.
+- Avoid redundant or overlapping labels.
+- Each schema label must be a single line.
+
+Output:
 CRITERION:
-- <one line>
+- <one sentence>
 
 SCHEMA:
-- Label1
-- Label2
+- <label 1>
+- <label 2>
 """
     return [
         {"role": "system", "content": system},
@@ -336,27 +380,26 @@ Output only:
 - topic_id
 - decision: "keep" or "delete"
 - topic_name: one or two words if "keep", otherwise null
-- reason: short justification reflecting interpretability, specificity, and naming quality
+- reason: cite 1–3 key words from the topic and explain how they led to topic_name (keep) or why they are unclear (delete). No generic phrases.
 
 Decision rule:
-- keep only if the topic is clearly interpretable, clearly specific, and can be given a good semantic topic_name
-- delete if it is unclear, generic, mixed, noisy, or cannot be named well
+- keep if the topic is interpretable and can be given a reasonable semantic topic_name
+- delete only if it is clearly unclear, generic, mixed, noisy, or cannot be named at all
 
 Naming rule:
-- topic_name must be natural, concise, semantic, and grounded in the topic words
-- use one or two words only
-- do not use vague or placeholder-like names such as "Thing", "Way", "Point", "Line", "Time", "Topic", "People Talk", "Like Thing", "Time Make"
-- if no good topic_name is possible, choose "delete"
+- topic_name must describe that topic's words only (topic_id N → name for topic N's words)
+- use one or two words; avoid vague placeholders like "Thing", "Way", "Point", "Line", "Time", "Topic"
+- if a reasonable topic_name is possible, prefer "keep"
 
 Rules:
-- If not clearly confident, choose "delete".
+- When in doubt, prefer "keep". Delete only when clearly problematic.
 - Exactly {n_topics} topics. Output {n_topics} JSON objects, topic_id 0 to {n_topics - 1}.
 - No extra text.
 
 JSON format:
 [
-  {{ "topic_id": 0, "decision": "keep", "topic_name": "Computer Hardware", "reason": "clear, specific, and naturally named as a hardware topic" }},
-  {{ "topic_id": 1, "decision": "delete", "topic_name": null, "reason": "too generic and cannot be given a good semantic name" }}
+  {{ "topic_id": 0, "decision": "keep", "topic_name": "Motorcycle Safety", "reason": "bike, helmet, insurance → riding safety" }},
+  {{ "topic_id": 1, "decision": "delete", "topic_name": null, "reason": "mw, mz, vv → noise, no coherent theme" }}
 ]
 """
     return [
@@ -374,16 +417,11 @@ def build_schema_aware_refine_prompt(
 
     system = (
         "You are an expert in topic modeling. "
-        "CRITICAL - Remove noise first: You MUST aggressively eliminate all noise words. "
-        "Noise includes: typos, words with 1-2 characters (e.g. mw, mz, vv, ee, hh, cx, pf), "
-        "meaningless abbreviations, unreadable/junk tokens, words that appear in many other topics (non-discriminative), "
-        "and any word that a human would not understand. "
-        "If a topic has such noise, remove it entirely before considering semantic relevance. "
-        "Your role is limited to two actions: "
-        "(1) eliminate noise and generic/discourse/metadata words from each topic, and "
-        "(2) assign the topic to the most relevant schema label. "
-        "If a topic remains too weak or semantically unclear after word elimination, you may mark it as delete instead of assigning a schema. "
-        "Use the provided schema and surviving topics, but you may revise a better-fitting schema label when necessary. "
+        "For each topic, do two things only: "
+        "(1) prune unnecessary words based on topic_name, "
+        "(2) assign the best schema label. "
+        "Use topic_name when it matches the words; replace it if it contradicts. "
+        "Be conservative: when in doubt, keep the word. "
         "Do not invent unsupported meanings."
     )
 
@@ -395,50 +433,38 @@ Surviving topics:
 {topics_text}
 
 Task:
-For each topic, do only these two things in order:
+For each topic:
 
-Example of word elimination (follow this pattern):
-- BAD: 1-2 char gibberish (xy, qr, ee), typos, unreadable tokens mixed with meaningful words
-- GOOD: keep only readable, meaningful, topic-specific words; remove all noise
-
-1) Word elimination (MANDATORY - do this first and aggressively)
-- REMOVE ALL NOISE: typos, words with 1-2 characters (mw, mz, vv, ee, hh, cx, pf, etc.), meaningless abbreviations, unreadable tokens. Any word a human cannot understand must be deleted.
-- REMOVE words that appear repeatedly across many other topics - they are not discriminative and add noise. Prefer topic-specific words only.
-- Remove words that are weak, generic, conversational, redundant, filler-like, or not clearly relevant to the topic's semantic core.
-- Keep only informative, readable, and representative words.
-- Retain words that help a human understand the topic's main meaning.
-- Prefer original words only. Do not add new unsupported words.
+1) Word elimination
+- Use topic_name only when it matches the words; if it contradicts the words, replace topic_name.
+- Remove only words that are clearly generic, meaningless, filler-like, or inconsistent with the topic.
+- Remove 1-2 character tokens only if they are not meaningful abbreviations or domain terms.
+- If a word overlaps with another topic, remove it only when it is not important for this topic.
+- Keep enough words to preserve the topic's meaning. Do not over-prune.
 
 2) Schema assignment
-- Using the remaining words and the given topic_name, assign the topic to the single best schema label from the provided schema.
-- If a topic is still too weak or unclear after word elimination, mark it as delete and do not assign schema.
-- Use the given schema labels as the default, but permit only minimal deletion, addition, or modification when necessary to improve semantic accuracy.
+- Assign the single best schema label using topic_name and the remaining words.
+- If the topic is still too weak or unclear, mark it as delete and set schema to null.
 
-Output: One JSON array. Each object: topic_id, topic_name, words (max 20), schema.
-
-Rules:
+Output rules:
+- Return exactly one JSON array.
 - Exactly {surviving_topics_n} topic objects.
-- Do not add, remove, split, or merge topics.
-- Keep the given topic_name unless it is clearly inconsistent with the remaining words.
-- Assign exactly one schema if kept; use null if deleted.
+- Each object must contain: topic_id, topic_name, words, schema.
+- Replace topic_name if it contradicts the words.
+- Use exactly one schema if kept, or null if deleted.
 - No explanation before or after the JSON.
 
 JSON format:
 [
   {{
     "topic_id": 0,
-    "topic_name": "Computer Hardware",
-    "words": ["clipper", "irq", "isa", "centris", "ati"],
-    "schema": "Technology"
-  }},
-  {{
-    "topic_id": 1,
-    "topic_name": "Time Make",
-    "words": ["time", "make"],
-    "schema": null
+    "topic_name": "example topic",
+    "words": ["word1", "word2", "word3"],
+    "schema": "example schema"
   }}
 ]
 """
+
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -835,6 +861,7 @@ def run_llm_four_step_schema_pipeline(
     for t in refined_topics:
         if isinstance(t, dict) and t.get("words"):
             t["words"] = filter_noise_words(t["words"])
+    remove_overlapping_words_across_topics(refined_topics, min_words_after=1)
     for g in schema_topics.get("schema", []):
         if isinstance(g, dict):
             for t in g.get("topics", []):
