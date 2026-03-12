@@ -4,7 +4,6 @@ Neural topic model training logic.
 Argument parsing is intentionally handled in `main.py` only.
 """
 import json
-import copy
 from collections import defaultdict
 from pathlib import Path
 
@@ -12,7 +11,7 @@ import numpy as np
 import torch
 
 from data import get_batch
-from dataset import load_20news
+from dataset import load_topic_dataset
 from evaluation import get_top_words_per_topic, run_evaluation
 from topic_models import create_topic_model
 from utils import (
@@ -26,7 +25,8 @@ from utils import (
 ROOT = Path(__file__).resolve().parent
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if DEVICE.type == "cuda":
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 if DEVICE.type == "cpu":
     print("Warning: CUDA not available, training on CPU (will be slow).")
 else:
@@ -34,7 +34,7 @@ else:
 
 
 def load_training_data(root, data_dir):
-    data = load_20news(root / data_dir)
+    data = load_topic_dataset(root / data_dir)
     train_bow = data["train_bow"]
     test_bow = data["test_bow"]
     embeddings = data["embeddings"]
@@ -170,6 +170,13 @@ def load_anchor_indices(anchor_words_file, anchor_topics_json, vocab):
         print("Loading anchor words from JSON:", anchor_topics_json)
         anchor_words_per_topic = load_anchor_words_from_step3_json(anchor_topics_json)
 
+    if len(anchor_words_per_topic) == 0:
+        raise ValueError(
+            "Anchor source produced zero topics. Check whether '{}' is empty or whether schema refinement removed all topics.".format(
+                anchor_words_file if anchor_words_file is not None else anchor_topics_json
+            )
+        )
+
     anchor_indices_per_topic = build_anchor_indices(anchor_words_per_topic, vocab)
     coverage = summarize_anchor_coverage(anchor_indices_per_topic)
     print(
@@ -177,6 +184,14 @@ def load_anchor_indices(anchor_words_file, anchor_topics_json, vocab):
         coverage,
         "(topics with zero anchors will not receive anchor loss)",
     )
+
+    if coverage["num_topics"] == 0:
+        raise ValueError("Anchor source produced zero topic groups.")
+    if coverage["num_topics_with_anchors"] == 0:
+        raise ValueError(
+            "Anchor source did not match any vocabulary terms. Check whether the anchor words belong to the selected dataset vocabulary."
+        )
+
     return anchor_indices_per_topic
 
 
@@ -280,17 +295,8 @@ def train_topic_model(
     device,
     extra_regularizer_fn=None,
 ):
-    patience = max(1, int(getattr(args, "patience", 30)))
-    min_delta = 1e-4
-    min_epochs = min(args.epochs, max(100, int(args.epochs * 0.4)))
-
-    best_epoch = 0
-    best_total_loss = float("inf")
-    best_state_dict = None
-    epochs_without_improvement = 0
-
     for epoch in range(1, args.epochs + 1):
-        epoch_metrics = _train_topic_model_epoch(
+        _train_topic_model_epoch(
             model=model,
             optimizer=optimizer,
             train_bow=train_bow,
@@ -299,39 +305,6 @@ def train_topic_model(
             epoch=epoch,
             extra_regularizer_fn=extra_regularizer_fn,
         )
-
-        epoch_total_loss = epoch_metrics.get("total_loss", float("inf"))
-        improved = (best_total_loss - epoch_total_loss) > min_delta
-        if improved:
-            best_total_loss = epoch_total_loss
-            best_epoch = epoch
-            best_state_dict = copy.deepcopy(model.state_dict())
-            epochs_without_improvement = 0
-        else:
-            epochs_without_improvement += 1
-
-        if (
-            epoch >= min_epochs
-            and epochs_without_improvement >= patience
-        ):
-            print(
-                "Early stopping at epoch {}. Best epoch: {} with total_loss={:.4f}".format(
-                    epoch,
-                    best_epoch,
-                    best_total_loss,
-                )
-            )
-            break
-
-    if best_state_dict is not None:
-        model.load_state_dict(best_state_dict)
-        if best_epoch and best_epoch != epoch:
-            print(
-                "Restored best model from epoch {} (total_loss={:.4f})".format(
-                    best_epoch,
-                    best_total_loss,
-                )
-            )
     return model
 
 
@@ -581,3 +554,72 @@ def run_train(args):
         "checkpoint_path": str(checkpoint_path),
         "metadata_path": str(metadata_path),
     }
+
+
+def run_eval_from_checkpoint(checkpoint_path, data_dir=None, root_dir=None):
+    """
+    Load a saved model checkpoint and run evaluation (TC, TD, Purity, NMI, PN).
+    checkpoint_path: path to model.pt or directory containing model.pt
+    data_dir: dataset path (required if not in checkpoint training_args)
+    root_dir: project root for dataset resolution (default: ROOT)
+    """
+    root = Path(root_dir) if root_dir else ROOT
+    ckpt = Path(checkpoint_path)
+    if ckpt.is_dir():
+        ckpt = ckpt / "model.pt"
+    if not ckpt.exists():
+        raise FileNotFoundError("Checkpoint not found: {}".format(ckpt))
+
+    print("Loading checkpoint:", ckpt)
+    checkpoint = torch.load(ckpt, map_location="cpu")
+
+    model_name = checkpoint.get("model_name", "etm")
+    model_kwargs = checkpoint["model_kwargs"]
+    state_dict = checkpoint["state_dict"]
+    training_args = checkpoint.get("training_args", {})
+
+    if data_dir is None:
+        data_dir = training_args.get("data_dir")
+    if data_dir is None:
+        dataset = training_args.get("dataset", "20News")
+        data_dir = str(Path("datasets") / dataset)
+    data_dir = str(data_dir)
+
+    print("Loading data from:", root / data_dir)
+    data = load_training_data(root, data_dir)
+    train_bow = data["train_bow"]
+    test_bow = data["test_bow"]
+    vocab = data["vocab"]
+    train_labels = data["train_labels"]
+    test_labels = data["test_labels"]
+    embeddings = data["embeddings"]
+    emsize = data["emsize"]
+
+    emb_tensor = torch.from_numpy(embeddings).float().to(DEVICE)
+    model_kwargs["embeddings"] = emb_tensor
+    model = create_topic_model(model_name, **model_kwargs).to(DEVICE)
+    model.load_state_dict(state_dict, strict=True)
+
+    args = type("Args", (), {})()
+    args.eval_batch_size = training_args.get("eval_batch_size", 256)
+    args.bow_norm = bool(training_args.get("bow_norm", 1))
+    args.topk_words = training_args.get("topk_words", 15)
+
+    print("\n--- Running evaluation ---")
+    eval_outputs = evaluate_topic_model(
+        model=model,
+        train_bow=train_bow,
+        test_bow=test_bow,
+        args=args,
+        vocab=vocab,
+        train_labels=train_labels,
+        test_labels=test_labels,
+        root_dir=str(root),
+        device=DEVICE,
+    )
+    metrics = eval_outputs["metrics"]
+    top_words = eval_outputs["top_words"]
+
+    print("\n--- Evaluation results ---")
+    print(json.dumps(metrics, indent=2))
+    return {"metrics": metrics, "top_words": top_words}

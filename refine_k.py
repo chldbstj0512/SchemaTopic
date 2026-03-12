@@ -7,6 +7,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
 MAX_LLM_NEW_TOKENS = 4096
+MISC_SCHEMA = "Misc"
 
 
 def load_topic_words_from_file(path: str) -> List[List[str]]:
@@ -205,15 +206,20 @@ def parse_schema_labels(schema_text: str) -> List[str]:
     return labels
 
 
-def filter_surviving_topics_by_verdict(
+def split_keep_and_misc(
     topic_words: List[List[str]],
     scores_json: Any,
-) -> List[Dict[str, Any]]:
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Split step2 verdict into: (topics for step3, misc topics).
+    - keep -> surviving_topics for step3
+    - delete -> each kept as separate topic with schema=Misc, topic_name=misc1, misc2, ...
+    """
     if not isinstance(scores_json, list):
-        return [
-            {"topic_id": i, "words": words}
-            for i, words in enumerate(topic_words)
-        ]
+        return (
+            [{"topic_id": i, "words": words} for i, words in enumerate(topic_words)],
+            [],
+        )
 
     deleted_ids = set()
     kept_topic_names = {}
@@ -238,14 +244,25 @@ def filter_surviving_topics_by_verdict(
             kept_topic_names[tid_int] = topic_name
 
     surviving = []
+    misc_topics = []
+    misc_counter = 1
+
     for i, words in enumerate(topic_words):
         if i in deleted_ids:
+            misc_topics.append({
+                "topic_id": i,
+                "topic_name": f"misc{misc_counter}",
+                "words": words,
+                "schema": MISC_SCHEMA,
+            })
+            misc_counter += 1
             continue
         item = {"topic_id": i, "words": words}
         if i in kept_topic_names:
             item["topic_name"] = kept_topic_names[i]
         surviving.append(item)
-    return surviving
+
+    return surviving, misc_topics
 
 
 def format_surviving_topics(surviving_topics: List[Dict[str, Any]], max_words: int = 20) -> str:
@@ -352,11 +369,19 @@ JSON format:
     ]
 
 
+def _ensure_misc_in_schema(schema_text: str) -> str:
+    """Ensure 'misc' is in the schema for step3 (weak topics)."""
+    if MISC_SCHEMA.lower() in schema_text.lower():
+        return schema_text
+    return schema_text.rstrip() + f"\n- {MISC_SCHEMA}"
+
+
 def build_schema_aware_refine_prompt(
     surviving_topics: List[Dict[str, Any]],
     schema_text: str,
     surviving_topics_n: int,
 ) -> List[Dict[str, str]]:
+    schema_text = _ensure_misc_in_schema(schema_text)
     topics_text = format_surviving_topics(surviving_topics)
 
     system = (
@@ -364,7 +389,7 @@ def build_schema_aware_refine_prompt(
         "Your role is limited to two actions: "
         "(1) eliminate generic, discourse-level, and metadata-like words from each topic that do not contribute clearly to the topic's semantic core, and"
         "(2) assign the topic to the most relevant schema label. "
-        "If a topic remains too weak or semantically unclear after word elimination, you may mark it as delete instead of assigning a schema. "
+        "If a topic remains too weak or semantically unclear after word elimination, assign it to schema 'misc' instead of deleting. "
         "Use the provided schema and surviving topics, but you may revise a better-fitting schema label when necessary. "
         "Do not invent unsupported meanings."
     )
@@ -387,16 +412,15 @@ For each topic, do only these two things in order:
 
 2) Schema assignment
 - Using the remaining words and the given topic_name, assign the topic to the single best schema label from the provided schema.
-- If a topic is still too weak or unclear after word elimination, mark it as delete and do not assign schema.
+- If a topic is still too weak or unclear after word elimination, assign it to schema '{MISC_SCHEMA}' instead of deleting.
 - Use the given schema labels as the default, but permit only minimal deletion, addition, or modification when necessary to improve semantic accuracy.
 
 Output: One JSON array. Each object: topic_id, topic_name, words (max 20), schema.
 
 Rules:
-- Exactly {surviving_topics_n} topic objects.
-- Do not add, remove, split, or merge topics.
+- Exactly {surviving_topics_n} topic objects. Do not add, remove, split, or merge topics.
 - Keep the given topic_name unless it is clearly inconsistent with the remaining words.
-- Assign exactly one schema if kept; use null if deleted.
+- Assign exactly one schema per topic (never use null). Use '{MISC_SCHEMA}' for weak/unclear topics.
 - No explanation before or after the JSON.
 
 JSON format:
@@ -409,9 +433,9 @@ JSON format:
   }},
   {{
     "topic_id": 1,
-    "topic_name": "Time Make",
-    "words": ["time", "make"],
-    "schema": null
+    "topic_name": "Generic Terms",
+    "words": ["time", "make", "thing"],
+    "schema": "{MISC_SCHEMA}"
   }}
 ]
 """
@@ -519,6 +543,56 @@ def call_llm_until_valid_json(
     return last_text, last_json
 
 
+def _assign_misc_topic_names(groups: List[Dict[str, Any]]) -> None:
+    """Assign misc1, misc2, ... to all topics in Misc schema group."""
+    for g in groups:
+        if not isinstance(g, dict):
+            continue
+        if str(g.get("label", "")).strip().lower() != MISC_SCHEMA.lower():
+            continue
+        topics = g.get("topics", [])
+        if not isinstance(topics, list):
+            continue
+        for i, t in enumerate(topics):
+            if isinstance(t, dict):
+                t["topic_name"] = f"misc{i + 1}"
+
+
+def merge_step2_misc_into_schema_topics(
+    schema_topics: Dict[str, Any],
+    step2_misc_topics: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Add step2 misc topics to schema_topics. Creates or appends to Misc group. Assigns misc1, misc2, ... to all Misc topics."""
+    if not step2_misc_topics:
+        return schema_topics
+
+    groups = schema_topics.get("schema", [])
+    if not isinstance(groups, list):
+        groups = []
+
+    misc_group = None
+    for g in groups:
+        if isinstance(g, dict) and str(g.get("label", "")).strip().lower() == MISC_SCHEMA.lower():
+            misc_group = g
+            break
+
+    misc_topics = [t for t in step2_misc_topics if isinstance(t, dict) and t.get("words")]
+    if not misc_topics:
+        return schema_topics
+
+    if misc_group is None:
+        groups.append({
+            "label": MISC_SCHEMA,
+            "topics": misc_topics,
+        })
+    else:
+        misc_group["topics"] = list(misc_group.get("topics", [])) + misc_topics
+        misc_group["topics"].sort(key=lambda x: x.get("topic_id", 0))
+
+    _assign_misc_topic_names(groups)
+    return {"schema": groups}
+
+
 def postprocess_final_topics(final_topics):
     grouped = []
     invalid_schema_values = {"", "none", "null"}
@@ -547,6 +621,8 @@ def postprocess_final_topics(final_topics):
                     continue
                 topic_id = item.get("topic_id", None)
                 topic_name = str(item.get("topic_name", "")).strip()
+                if schema.lower() == MISC_SCHEMA.lower():
+                    topic_name = topic_name or MISC_SCHEMA
                 words = item.get("words", [])
                 if topic_id is None or not topic_name or not isinstance(words, list):
                     continue
@@ -592,6 +668,8 @@ def postprocess_final_topics(final_topics):
             words = item.get("words", [])
             schema_raw = item.get("schema", "")
             schema = str(schema_raw).strip()
+            if schema.lower() == MISC_SCHEMA.lower():
+                topic_name = topic_name or MISC_SCHEMA
             if (
                 topic_id is None
                 or not topic_name
@@ -663,7 +741,7 @@ def flatten_schema_topics(schema_topics: Any) -> List[Dict[str, Any]]:
             if not isinstance(topic, dict):
                 continue
             topic_id = topic.get("topic_id", None)
-            topic_name = str(topic.get("topic_name", "")).strip()
+            topic_name = str(topic.get("topic_name", "")).strip() or schema
             words = topic.get("words", [])
             if topic_id is None or not topic_name or not isinstance(words, list):
                 continue
@@ -782,14 +860,14 @@ def run_llm_four_step_schema_pipeline(
     print("\n===== STEP 2: SCORE + PRUNE =====\n")
     print(step2_text)
 
-    surviving_topics = filter_surviving_topics_by_verdict(topic_words, step2_json)
+    surviving_topics, step2_misc_topics = split_keep_and_misc(topic_words, step2_json)
     surviving_ids_step2 = sorted(t["topic_id"] for t in surviving_topics)
     deleted_ids_step2 = sorted(set(initial_topic_ids) - set(surviving_ids_step2))
     if deleted_ids_step2:
-        print(f"[Step 2] Deleted {len(deleted_ids_step2)} topics:", deleted_ids_step2)
+        print(f"[Step 2] Moved to misc {len(deleted_ids_step2)} topics:", deleted_ids_step2)
     else:
-        print("[Step 2] Deleted 0 topics: []")
-    print(f"[Step 2] Remaining topics: {len(surviving_ids_step2)}")
+        print("[Step 2] Moved to misc 0 topics: []")
+    print(f"[Step 2] Topics for step3: {len(surviving_ids_step2)}")
 
     step3_messages = build_schema_aware_refine_prompt(
         surviving_topics=surviving_topics,
@@ -806,6 +884,7 @@ def run_llm_four_step_schema_pipeline(
         device=device,
     )
     schema_topics = postprocess_final_topics(step3_json or {})
+    schema_topics = merge_step2_misc_into_schema_topics(schema_topics, step2_misc_topics)
     refined_topics = flatten_schema_topics(schema_topics)
     schema_topic_words = build_schema_topic_words(schema_topics)
     final_topic_ids = sorted(topic["topic_id"] for topic in refined_topics)
@@ -850,10 +929,19 @@ def run_llm_four_step_schema_pipeline(
         json.dump(schema_topics, f, ensure_ascii=False, indent=2)
 
     with open(topic_words_path, "w", encoding="utf-8") as f:
-        if isinstance(refined_topics, list):
-            for topic in refined_topics:
-                words = topic.get("words", [])
-                f.write(f"Topic {topic['topic_id']}: {' '.join(words)}\n")
+        all_topics_for_txt = list(refined_topics) if isinstance(refined_topics, list) else []
+        existing_ids = {t["topic_id"] for t in all_topics_for_txt}
+        for m in step2_misc_topics:
+            if isinstance(m, dict) and m.get("topic_id") not in existing_ids and m.get("words"):
+                all_topics_for_txt.append({
+                    "topic_id": m["topic_id"],
+                    "words": m.get("words", []),
+                })
+                existing_ids.add(m["topic_id"])
+        all_topics_for_txt.sort(key=lambda x: x["topic_id"])
+        for topic in all_topics_for_txt:
+            words = topic.get("words", [])
+            f.write(f"Topic {topic['topic_id']}: {' '.join(words)}\n")
 
     with open(schema_topic_words_path, "w", encoding="utf-8") as f:
         for item in schema_topic_words:

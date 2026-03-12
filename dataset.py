@@ -1,5 +1,5 @@
 """
-dataset: train/test pkl, voc.txt, word_embeddings 로드 후 BOW 텐서 생성
+dataset: preprocessed topic-model dataset loader utilities.
 """
 import pickle
 import numpy as np
@@ -8,10 +8,9 @@ from pathlib import Path
 
 
 def load_vocab(voc_path):
-    """voc.txt 한 줄(공백 구분) 로드 → 단어 리스트"""
-    with open(voc_path, "r") as f:
-        line = f.read().strip()
-    return line.split()
+    """Load vocabulary terms from whitespace-separated `voc.txt`."""
+    with open(voc_path, "r", encoding="utf-8") as f:
+        return f.read().split()
 
 
 def load_embeddings(emb_path):
@@ -34,9 +33,34 @@ def tokens_counts_to_bow(tokens_list, counts_list, vocab_size):
     return bow
 
 
-def load_20news(data_dir):
+def list_available_datasets(datasets_root=None):
+    """Return dataset names that already have ETM-style preprocessed files."""
+    root = Path(datasets_root) if datasets_root is not None else Path(__file__).resolve().parent / "datasets"
+    if not root.exists():
+        return []
+
+    dataset_names = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        required_files = (
+            child / "train.pkl",
+            child / "test.pkl",
+            child / "voc.txt",
+            child / "word_embeddings.npy",
+        )
+        if all(path.exists() for path in required_files):
+            dataset_names.append(child.name)
+    return dataset_names
+
+
+def infer_dataset_name(data_dir):
+    return Path(data_dir).name
+
+
+def load_topic_dataset(data_dir):
     """
-    data_dir: datasets/20News 같은 경로
+    data_dir: preprocessed dataset directory such as `datasets/20News`
     Returns:
         train_bow: (N_train, V) tensor
         test_bow: (N_test, V) tensor
@@ -46,6 +70,21 @@ def load_20news(data_dir):
         embeddings: (V, emsize) numpy
     """
     data_dir = Path(data_dir)
+    required_files = {
+        "train.pkl": data_dir / "train.pkl",
+        "test.pkl": data_dir / "test.pkl",
+        "voc.txt": data_dir / "voc.txt",
+        "word_embeddings.npy": data_dir / "word_embeddings.npy",
+    }
+    missing_files = [name for name, path in required_files.items() if not path.exists()]
+    if missing_files:
+        raise FileNotFoundError(
+            "Dataset directory '{}' is missing required files: {}".format(
+                data_dir,
+                ", ".join(missing_files),
+            )
+        )
+
     with open(data_dir / "train.pkl", "rb") as f:
         train = pickle.load(f)
     with open(data_dir / "test.pkl", "rb") as f:
@@ -75,3 +114,8 @@ def load_20news(data_dir):
         "embeddings": embeddings,
         "vocab_size": vocab_size,
     }
+
+
+def load_20news(data_dir):
+    """Backward-compatible alias for the legacy loader name."""
+    return load_topic_dataset(data_dir)

@@ -227,7 +227,7 @@ def load_anchor_words_from_llm_words_file(path):
             if not line:
                 topics.append([])
                 continue
-            if line.lower().startswith("topic ") and ":" in line:
+            if ":" in line:
                 line = line.split(":", 1)[1].strip()
             topics.append(line.split())
     return topics
@@ -239,6 +239,31 @@ def load_anchor_words_from_step3_json(path):
     """
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
+
+    if isinstance(data, dict):
+        schema_groups = data.get("schema", [])
+        if not isinstance(schema_groups, list):
+            raise ValueError("schema_topics_json must contain a 'schema' list.")
+
+        topics_dict = {}
+        for group in schema_groups:
+            if not isinstance(group, dict):
+                continue
+            topics = group.get("topics", [])
+            if not isinstance(topics, list):
+                continue
+            for item in topics:
+                if not isinstance(item, dict):
+                    continue
+                tid = item.get("topic_id", None)
+                words = item.get("words", None)
+                if tid is None or not isinstance(words, list):
+                    continue
+                topics_dict[int(tid)] = [str(w).strip() for w in words if str(w).strip()]
+        if not topics_dict:
+            return []
+        max_tid = max(topics_dict.keys())
+        return [topics_dict.get(tid, []) for tid in range(max_tid + 1)]
 
     if not isinstance(data, list):
         raise ValueError("step3_json must be a list of topic dicts.")

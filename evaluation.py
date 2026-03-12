@@ -15,7 +15,11 @@ def compute_purity_nmi(theta, labels, num_topics):
     N = theta.shape[0]
     pred_cluster = np.argmax(theta, axis=1)  # (N,)
     labels = np.asarray(labels).flatten().astype(int)
+    if N == 0 or len(labels) == 0:
+        return 0.0, 0.0
     num_classes = int(labels.max()) + 1
+    if num_classes <= 0:
+        return 0.0, 0.0
 
     # Purity: for each cluster, assign to majority class; purity = sum(max_j n_ij) / N
     contingency = np.zeros((num_topics, num_classes))

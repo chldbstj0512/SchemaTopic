@@ -1,4 +1,4 @@
-from .adapters import BaseTopicModel, ECRTM, ETM, LossBundle, NSTM, NVDM, PLDA, SCHOLAR, WETE
+from .adapters import BaseTopicModel, ECRTM, ETM, LossBundle, NSTM, NVDM, PLDA, SCHOLAR
 
 
 MODEL_REGISTRY = {
@@ -8,7 +8,6 @@ MODEL_REGISTRY = {
     "nvdm": NVDM,
     "plda": PLDA,
     "scholar": SCHOLAR,
-    "wete": WETE,
 }
 
 
@@ -37,7 +36,6 @@ __all__ = [
     "NVDM",
     "PLDA",
     "SCHOLAR",
-    "WETE",
     "create_topic_model",
     "list_supported_topic_models",
 ]
