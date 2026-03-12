@@ -53,7 +53,7 @@ def compute_purity_nmi(theta, labels, num_topics):
     return float(purity), float(nmi)
 
 
-def run_evaluation(beta, theta_train, theta_test, train_bow, train_labels, test_labels,
+def run_evaluation(beta, theta_test, train_bow, test_labels,
                    vocab, num_topics, topk_words=10, n_docs_coherence=2000, root_dir=None):
     """
     TC (C_V), TD, (Purity + NMI)/2 계산.
@@ -74,18 +74,13 @@ def run_evaluation(beta, theta_train, theta_test, train_bow, train_labels, test_
     td = get_topic_diversity(beta_np, topk=25)
     print("[Evaluation] Topic diversity finished.")
 
-    # Clustering on train (표준은 test로도 보고)
-    purity_train, nmi_train = compute_purity_nmi(
-        theta_train, train_labels, num_topics
-    )
-    purity_test, nmi_test = compute_purity_nmi(
+    # Clustering on test only
+    purity, nmi = compute_purity_nmi(
         theta_test, test_labels, num_topics
     )
-    purity = (purity_train + purity_test) / 2
-    nmi = (nmi_train + nmi_test) / 2
     pn = (purity + nmi) / 2  # PN = (Purity + NMI) / 2
-    print("Purity (train/test avg):", round(purity, 4))
-    print("NMI (train/test avg):", round(nmi, 4))
+    print("Purity (test):", round(purity, 4))
+    print("NMI (test):", round(nmi, 4))
     print("PN (Purity+NMI)/2:", round(pn, 4))
     print("[Evaluation] All metrics finished.\n")
 

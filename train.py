@@ -109,10 +109,8 @@ def evaluate_topic_model(
     )
     metrics = run_evaluation(
         beta,
-        theta_train,
         theta_test,
         train_bow_np,
-        train_labels,
         test_labels,
         vocab,
         beta.shape[0],
