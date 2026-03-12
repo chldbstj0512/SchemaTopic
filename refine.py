@@ -361,8 +361,13 @@ def build_schema_aware_refine_prompt(
 
     system = (
         "You are an expert in topic modeling. "
+        "CRITICAL - Remove noise first: You MUST aggressively eliminate all noise words. "
+        "Noise includes: typos, random 2-3 letter strings (e.g. mw, mz, vv, ee, hh, cx, pf), "
+        "meaningless abbreviations, unreadable/junk tokens, words that appear in many other topics (non-discriminative), "
+        "and any word that a human would not understand. "
+        "If a topic has such noise, remove it entirely before considering semantic relevance. "
         "Your role is limited to two actions: "
-        "(1) eliminate generic, discourse-level, and metadata-like words from each topic that do not contribute clearly to the topic's semantic core, and"
+        "(1) eliminate noise and generic/discourse/metadata words from each topic, and "
         "(2) assign the topic to the most relevant schema label. "
         "If a topic remains too weak or semantically unclear after word elimination, you may mark it as delete instead of assigning a schema. "
         "Use the provided schema and surviving topics, but you may revise a better-fitting schema label when necessary. "
@@ -379,9 +384,15 @@ Surviving topics:
 Task:
 For each topic, do only these two things in order:
 
-1) Word elimination
+Example of word elimination (follow this pattern):
+- BAD: short gibberish (xy, qr, ee), typos, unreadable tokens mixed with meaningful words
+- GOOD: keep only readable, meaningful, topic-specific words; remove all noise
+
+1) Word elimination (MANDATORY - do this first and aggressively)
+- REMOVE ALL NOISE: typos, random 2-3 letter strings (mw, mz, vv, ee, hh, cx, pf, etc.), meaningless abbreviations, unreadable tokens. Any word a human cannot understand must be deleted.
+- REMOVE words that appear repeatedly across many other topics - they are not discriminative and add noise. Prefer topic-specific words only.
 - Remove words that are weak, generic, conversational, redundant, filler-like, or not clearly relevant to the topic's semantic core.
-- Keep only informative and representative words.
+- Keep only informative, readable, and representative words.
 - Retain words that help a human understand the topic's main meaning.
 - Prefer original words only. Do not add new unsupported words.
 
