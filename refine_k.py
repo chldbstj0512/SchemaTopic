@@ -581,6 +581,60 @@ def _assign_misc_topic_names(groups: List[Dict[str, Any]]) -> None:
                 t["topic_name"] = f"misc{i + 1}"
 
 
+def _schema_topics_from_refined_list(refined_topics: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """refined_topics (flat) -> schema_topics (grouped by schema). 50개 보장."""
+    grouped_map = {}
+    schema_order = []
+    for t in refined_topics:
+        if not isinstance(t, dict):
+            continue
+        schema = str(t.get("schema", MISC_SCHEMA)).strip() or MISC_SCHEMA
+        topic_id = t.get("topic_id")
+        topic_name = str(t.get("topic_name", "")).strip() or schema
+        words = t.get("words", [])
+        if topic_id is None or not isinstance(words, list):
+            continue
+        if schema not in grouped_map:
+            grouped_map[schema] = []
+            schema_order.append(schema)
+        grouped_map[schema].append({"topic_id": topic_id, "topic_name": topic_name, "words": words})
+    groups = []
+    for schema in schema_order:
+        topics = sorted(grouped_map[schema], key=lambda x: x["topic_id"])
+        groups.append({"label": schema, "topics": topics})
+    return {"schema": groups}
+
+
+def _fill_missing_topics_for_keep_mode(
+    refined_topics: List[Dict[str, Any]],
+    all_sources: List[Dict[str, Any]],
+    expected_count: int,
+) -> List[Dict[str, Any]]:
+    """keep 모드: expected_count만큼 토픽이 있어야 함. 누락된 topic_id를 all_sources에서 복구."""
+    existing_ids = {t["topic_id"] for t in refined_topics if isinstance(t, dict) and t.get("topic_id") is not None}
+    if len(existing_ids) >= expected_count:
+        return refined_topics
+    source_by_id = {}
+    for s in all_sources:
+        if isinstance(s, dict) and s.get("topic_id") is not None:
+            source_by_id[s["topic_id"]] = s
+    filled = list(refined_topics)
+    for tid in range(expected_count):
+        if tid in existing_ids:
+            continue
+        if tid not in source_by_id:
+            continue
+        src = source_by_id[tid]
+        filled.append({
+            "topic_id": tid,
+            "topic_name": src.get("topic_name", MISC_SCHEMA),
+            "words": list(src.get("words", []))[:20],
+            "schema": src.get("schema", MISC_SCHEMA),
+        })
+    filled.sort(key=lambda x: x.get("topic_id", 0))
+    return filled
+
+
 def merge_step2_misc_into_schema_topics(
     schema_topics: Dict[str, Any],
     step2_misc_topics: List[Dict[str, Any]],
@@ -677,7 +731,7 @@ def postprocess_final_topics(final_topics):
                     seen_words.add(wl)
                     cleaned_words.append(w)
 
-                if len(cleaned_words) < 3:
+                if len(cleaned_words) < 1:
                     continue
 
                 cleaned_topics.append(
@@ -727,7 +781,7 @@ def postprocess_final_topics(final_topics):
                 seen_words.add(wl)
                 cleaned_words.append(w)
 
-            if len(cleaned_words) < 3:
+            if len(cleaned_words) < 1:
                 continue
 
             if schema not in grouped_map:
@@ -924,6 +978,12 @@ def run_llm_four_step_schema_pipeline(
     # step3에 misc 포함됐으면 이미 반영. 누락된 misc가 있으면 merge로 보완
     schema_topics = merge_step2_misc_into_schema_topics(schema_topics, step2_misc_topics)
     refined_topics = flatten_schema_topics(schema_topics)
+    # keep 모드: 50개 유지. LLM이 누락한 topic_id가 있으면 surviving/misc에서 복구
+    all_sources = surviving_topics + step2_misc_topics
+    refined_topics = _fill_missing_topics_for_keep_mode(
+        refined_topics, all_sources, expected_count=len(topic_words)
+    )
+    schema_topics = _schema_topics_from_refined_list(refined_topics)
     schema_topic_words = build_schema_topic_words(schema_topics)
     final_topic_ids = sorted(topic["topic_id"] for topic in refined_topics)
     deleted_ids_step3 = sorted(set(surviving_ids_step2) - set(final_topic_ids))
