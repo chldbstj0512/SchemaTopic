@@ -9,6 +9,19 @@ import torch
 MAX_LLM_NEW_TOKENS = 4096
 MISC_SCHEMA = "Misc"
 
+# ---------------------------------------------------------------------------
+# Topic word validation (hallucination / noise prevention)
+# LLM이 놓친 노이즈·할루시네이션을 사후 검증하여 제거. 2글자 이하 → 전부 삭제.
+# ---------------------------------------------------------------------------
+_MIN_WORD_LEN = 3  # 2글자 이하 단어 전부 제거
+
+
+def filter_noise_words(words: List[str]) -> List[str]:
+    """Topic word validation: 2글자 이하 토큰 전부 제거. LLM 출력 및 fill 시 공통 적용."""
+    if not words:
+        return []
+    return [w for w in words if isinstance(w, str) and len(w.strip()) >= _MIN_WORD_LEN]
+
 
 def load_topic_words_from_file(path: str) -> List[List[str]]:
     topic_words = []
@@ -391,7 +404,7 @@ def build_schema_aware_refine_prompt(
     system = (
         "You are an expert in topic modeling. "
         "CRITICAL - Remove noise first: You MUST aggressively eliminate all noise words. "
-        "Noise includes: typos, random 2-3 letter strings (e.g. mw, mz, vv, ee, hh, cx, pf), "
+        "Noise includes: typos, words with 1-2 characters (e.g. mw, mz, vv, ee, hh, cx, pf), "
         "meaningless abbreviations, unreadable/junk tokens, words that appear in many other topics (non-discriminative), "
         "and any word that a human would not understand. "
         "If a topic has such noise, remove it entirely before considering semantic relevance. "
@@ -422,11 +435,11 @@ Task:
 For each topic above, do only these two things in order:
 
 Example of word elimination (follow this pattern):
-- BAD: short gibberish (xy, qr, ee), typos, unreadable tokens mixed with meaningful words
+- BAD: 1-2 char gibberish (xy, qr, ee), typos, unreadable tokens mixed with meaningful words
 - GOOD: keep only readable, meaningful, topic-specific words; remove all noise
 
 1) Word elimination (MANDATORY - do this first and aggressively)
-- REMOVE ALL NOISE: typos, random 2-3 letter strings (mw, mz, vv, ee, hh, cx, pf, etc.), meaningless abbreviations, unreadable tokens. Any word a human cannot understand must be deleted.
+- REMOVE ALL NOISE: typos, words with 1-2 characters (mw, mz, vv, ee, hh, cx, pf, etc.), meaningless abbreviations, unreadable tokens. Any word a human cannot understand must be deleted.
 - REMOVE words that appear repeatedly across many other topics - they are not discriminative and add noise. Prefer topic-specific words only.
 - Remove words that are weak, generic, conversational, redundant, filler-like, or not clearly relevant to the topic's semantic core.
 - Keep only informative, readable, and representative words.
@@ -625,10 +638,11 @@ def _fill_missing_topics_for_keep_mode(
         if tid not in source_by_id:
             continue
         src = source_by_id[tid]
+        raw_words = list(src.get("words", []))[:20]
         filled.append({
             "topic_id": tid,
             "topic_name": src.get("topic_name", MISC_SCHEMA),
-            "words": list(src.get("words", []))[:20],
+            "words": filter_noise_words(raw_words),  # validation: fill 시에도 동일 규칙
             "schema": src.get("schema", MISC_SCHEMA),
         })
     filled.sort(key=lambda x: x.get("topic_id", 0))
@@ -983,6 +997,10 @@ def run_llm_four_step_schema_pipeline(
     refined_topics = _fill_missing_topics_for_keep_mode(
         refined_topics, all_sources, expected_count=len(topic_words)
     )
+    # Topic word validation (hallucination prevention): LLM 출력 사후 검증
+    for t in refined_topics:
+        if isinstance(t, dict) and t.get("words"):
+            t["words"] = filter_noise_words(t["words"])
     schema_topics = _schema_topics_from_refined_list(refined_topics)
     schema_topic_words = build_schema_topic_words(schema_topics)
     final_topic_ids = sorted(topic["topic_id"] for topic in refined_topics)
