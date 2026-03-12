@@ -7,8 +7,8 @@ def load_anchor_words_from_llm_words_file(path: str) -> List[List[str]]:
     Load topic-wise anchor words from the LLM words file.
 
     Expected format (as written by llm_refine.py: words_path):
-        line 0: "word1 word2 word3 ..."
-        line 1: "wordA wordB ..."
+        line 0: "Topic 0: word1 word2 word3 ..."
+        line 1: "Topic 1: wordA wordB ..."
         ...
     Each line corresponds to one topic.
     """
@@ -19,6 +19,8 @@ def load_anchor_words_from_llm_words_file(path: str) -> List[List[str]]:
             if not line:
                 topics.append([])
                 continue
+            if line.lower().startswith("topic ") and ":" in line:
+                line = line.split(":", 1)[1].strip()
             topics.append(line.split())
     return topics
 

@@ -1,9 +1,0 @@
-DELETE:
-- Topic 15: hell, bunch, kid, let, thing, guy, silly, buck, damn, guess, joke, bob, blow, maybe, big
-- Topic 23: id, stuff, meg, deleted, dod, ok, im, nd, hi, com, discus, spec, cop, na, sb
-- Topic 37: ive, doesnt, dont, isnt, wont, thats, havent, simms, didnt, hate, okay, bad, really, apps, physic
-- Topic 39: dont, didnt, thats, youre, theyre, wouldnt, arent, whats, youll, wasnt, btw, doesnt, youd, andor, batf
-- Topic 47: im, dont, know, sure, th, think, sorry, oh, folk, tell, guess, anybody, remember, maybe, pas
-
-EXPLANATION:
-These topics are mostly junk, too generic, or have no clear semantic meaning. They are weak near-duplicates of other topics or do not provide any interpretable information.

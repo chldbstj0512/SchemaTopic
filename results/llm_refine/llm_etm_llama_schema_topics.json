@@ -1,0 +1,366 @@
+{
+  "schema": [
+    {
+      "label": "Technology",
+      "topics": [
+        {
+          "topic_id": 0,
+          "topic_name": "Computer Hardware",
+          "words": [
+            "clipper",
+            "irq",
+            "isa",
+            "centris",
+            "ati"
+          ]
+        },
+        {
+          "topic_id": 8,
+          "topic_name": "Software Code",
+          "words": [
+            "file",
+            "program",
+            "source",
+            "code"
+          ]
+        },
+        {
+          "topic_id": 9,
+          "topic_name": "Data Security",
+          "words": [
+            "key",
+            "encryption",
+            "data",
+            "security"
+          ]
+        },
+        {
+          "topic_id": 11,
+          "topic_name": "Printer Monitor",
+          "words": [
+            "monitor",
+            "printer",
+            "color",
+            "font"
+          ]
+        },
+        {
+          "topic_id": 12,
+          "topic_name": "Unix Resource",
+          "words": [
+            "ftp",
+            "user",
+            "widget",
+            "resource"
+          ]
+        },
+        {
+          "topic_id": 18,
+          "topic_name": "Car Bike",
+          "words": [
+            "car",
+            "bike",
+            "engine",
+            "brake"
+          ]
+        },
+        {
+          "topic_id": 25,
+          "topic_name": "Computer Drive",
+          "words": [
+            "drive",
+            "card",
+            "disk",
+            "scsi"
+          ]
+        },
+        {
+          "topic_id": 28,
+          "topic_name": "Image File",
+          "words": [
+            "image",
+            "file",
+            "display",
+            "format"
+          ]
+        },
+        {
+          "topic_id": 32,
+          "topic_name": "Window Server",
+          "words": [
+            "window",
+            "bit",
+            "run",
+            "set"
+          ]
+        },
+        {
+          "topic_id": 49,
+          "topic_name": "Available Support",
+          "words": [
+            "available",
+            "support",
+            "graphic",
+            "software"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Communication",
+      "topics": [
+        {
+          "topic_id": 1,
+          "topic_name": "Email List",
+          "words": [
+            "email",
+            "list",
+            "send",
+            "address",
+            "mail"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Education",
+      "topics": [
+        {
+          "topic_id": 2,
+          "topic_name": "Question Answer",
+          "words": [
+            "question",
+            "answer",
+            "ask",
+            "response"
+          ]
+        },
+        {
+          "topic_id": 13,
+          "topic_name": "Article Read",
+          "words": [
+            "article",
+            "read",
+            "subject",
+            "note"
+          ]
+        },
+        {
+          "topic_id": 21,
+          "topic_name": "Problem Help",
+          "words": [
+            "problem",
+            "time",
+            "help",
+            "try"
+          ]
+        },
+        {
+          "topic_id": 26,
+          "topic_name": "Point Claim",
+          "words": [
+            "point",
+            "people",
+            "right",
+            "claim"
+          ]
+        },
+        {
+          "topic_id": 36,
+          "topic_name": "University Research",
+          "words": [
+            "university",
+            "information",
+            "conference",
+            "national"
+          ]
+        },
+        {
+          "topic_id": 44,
+          "topic_name": "Argument Evidence",
+          "words": [
+            "argument",
+            "evidence",
+            "fact",
+            "prove"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Business",
+      "topics": [
+        {
+          "topic_id": 3,
+          "topic_name": "Performance Level",
+          "words": [
+            "performance",
+            "level",
+            "quality",
+            "rate"
+          ]
+        },
+        {
+          "topic_id": 4,
+          "topic_name": "Product Price",
+          "words": [
+            "price",
+            "sale",
+            "cost",
+            "buy"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Science",
+      "topics": [
+        {
+          "topic_id": 5,
+          "topic_name": "Light Source",
+          "words": [
+            "light",
+            "flame",
+            "battery",
+            "heat"
+          ]
+        },
+        {
+          "topic_id": 27,
+          "topic_name": "Space Mission",
+          "words": [
+            "space",
+            "earth",
+            "spacecraft",
+            "orbit"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Politics",
+      "topics": [
+        {
+          "topic_id": 6,
+          "topic_name": "Gun Law",
+          "words": [
+            "gun",
+            "law",
+            "right",
+            "weapon"
+          ]
+        },
+        {
+          "topic_id": 14,
+          "topic_name": "Government Job",
+          "words": [
+            "people",
+            "state",
+            "job",
+            "money"
+          ]
+        },
+        {
+          "topic_id": 16,
+          "topic_name": "Armenian War",
+          "words": [
+            "armenian",
+            "war",
+            "turkish",
+            "israel"
+          ]
+        },
+        {
+          "topic_id": 42,
+          "topic_name": "President Action",
+          "words": [
+            "president",
+            "said",
+            "fbi",
+            "know"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Arts",
+      "topics": [
+        {
+          "topic_id": 20,
+          "topic_name": "Good Picture",
+          "words": [
+            "good",
+            "like",
+            "picture",
+            "little"
+          ]
+        },
+        {
+          "topic_id": 41,
+          "topic_name": "Book Copy",
+          "words": [
+            "book",
+            "new",
+            "copy",
+            "art"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Religion",
+      "topics": [
+        {
+          "topic_id": 24,
+          "topic_name": "Christian Faith",
+          "words": [
+            "god",
+            "jesus",
+            "christ",
+            "christian"
+          ]
+        },
+        {
+          "topic_id": 30,
+          "topic_name": "Religion Belief",
+          "words": [
+            "religion",
+            "believe",
+            "people",
+            "think"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Health",
+      "topics": [
+        {
+          "topic_id": 33,
+          "topic_name": "Disease Health",
+          "words": [
+            "disease",
+            "health",
+            "infection",
+            "medical"
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Sports",
+      "topics": [
+        {
+          "topic_id": 45,
+          "topic_name": "Game Team",
+          "words": [
+            "game",
+            "team",
+            "play",
+            "player"
+          ]
+        }
+      ]
+    }
+  ]
+}

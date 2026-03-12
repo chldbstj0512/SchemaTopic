@@ -1,0 +1,238 @@
+Here is the output in the required JSON format:
+
+[
+  {
+    "topic_id": 0,
+    "topic_name": "Computer Hardware",
+    "words": ["clipper", "irq", "isa", "centris", "ati"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 1,
+    "topic_name": "Email List",
+    "words": ["email", "list", "send", "address", "mail"],
+    "schema": "Communication"
+  },
+  {
+    "topic_id": 2,
+    "topic_name": "Question Answer",
+    "words": ["question", "answer", "ask", "response"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 3,
+    "topic_name": "Performance Level",
+    "words": ["performance", "level", "quality", "rate"],
+    "schema": "Business"
+  },
+  {
+    "topic_id": 4,
+    "topic_name": "Product Price",
+    "words": ["price", "sale", "cost", "buy"],
+    "schema": "Business"
+  },
+  {
+    "topic_id": 5,
+    "topic_name": "Light Source",
+    "words": ["light", "flame", "battery", "heat"],
+    "schema": "Science"
+  },
+  {
+    "topic_id": 6,
+    "topic_name": "Gun Law",
+    "words": ["gun", "law", "right", "weapon"],
+    "schema": "Politics"
+  },
+  {
+    "topic_id": 8,
+    "topic_name": "Software Code",
+    "words": ["file", "program", "source", "code"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 9,
+    "topic_name": "Data Security",
+    "words": ["key", "encryption", "data", "security"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 10,
+    "topic_name": "Work Help",
+    "words": ["work", "need", "help", "try"],
+    "schema": null
+  },
+  {
+    "topic_id": 11,
+    "topic_name": "Printer Monitor",
+    "words": ["monitor", "printer", "color", "font"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 12,
+    "topic_name": "Unix Resource",
+    "words": ["ftp", "user", "widget", "resource"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 13,
+    "topic_name": "Article Read",
+    "words": ["article", "read", "subject", "note"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 14,
+    "topic_name": "Government Job",
+    "words": ["people", "state", "job", "money"],
+    "schema": "Politics"
+  },
+  {
+    "topic_id": 16,
+    "topic_name": "Armenian War",
+    "words": ["armenian", "war", "turkish", "israel"],
+    "schema": "Politics"
+  },
+  {
+    "topic_id": 17,
+    "topic_name": "Time Post",
+    "words": ["time", "post", "ago", "month"],
+    "schema": null
+  },
+  {
+    "topic_id": 18,
+    "topic_name": "Car Bike",
+    "words": ["car", "bike", "engine", "brake"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 20,
+    "topic_name": "Good Picture",
+    "words": ["good", "like", "picture", "little"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 21,
+    "topic_name": "Problem Help",
+    "words": ["problem", "time", "help", "try"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 24,
+    "topic_name": "Christian Faith",
+    "words": ["god", "jesus", "christ", "christian"],
+    "schema": "Religion"
+  },
+  {
+    "topic_id": 25,
+    "topic_name": "Computer Drive",
+    "words": ["drive", "card", "disk", "scsi"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 26,
+    "topic_name": "Point Claim",
+    "words": ["point", "people", "right", "claim"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 27,
+    "topic_name": "Space Mission",
+    "words": ["space", "earth", "spacecraft", "orbit"],
+    "schema": "Science"
+  },
+  {
+    "topic_id": 28,
+    "topic_name": "Image File",
+    "words": ["image", "file", "display", "format"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 30,
+    "topic_name": "Religion Belief",
+    "words": ["religion", "believe", "people", "think"],
+    "schema": "Religion"
+  },
+  {
+    "topic_id": 31,
+    "topic_name": "New Number",
+    "words": ["new", "number", "based", "currently"],
+    "schema": null
+  },
+  {
+    "topic_id": 32,
+    "topic_name": "Window Server",
+    "words": ["window", "bit", "run", "set"],
+    "schema": "Technology"
+  },
+  {
+    "topic_id": 33,
+    "topic_name": "Disease Health",
+    "words": ["disease", "health", "infection", "medical"],
+    "schema": "Health"
+  },
+  {
+    "topic_id": 35,
+    "topic_name": "Control Power",
+    "words": ["control", "power", "hand", "make"],
+    "schema": null
+  },
+  {
+    "topic_id": 36,
+    "topic_name": "University Research",
+    "words": ["university", "information", "conference", "national"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 38,
+    "topic_name": "New Year",
+    "words": ["new", "year", "area", "world"],
+    "schema": null
+  },
+  {
+    "topic_id": 40,
+    "topic_name": "Time Make",
+    "words": ["time", "make"],
+    "schema": null
+  },
+  {
+    "topic_id": 41,
+    "topic_name": "Book Copy",
+    "words": ["book", "new", "copy", "art"],
+    "schema": "Arts"
+  },
+  {
+    "topic_id": 42,
+    "topic_name": "President Action",
+    "words": ["president", "said", "fbi", "know"],
+    "schema": "Politics"
+  },
+  {
+    "topic_id": 44,
+    "topic_name": "Argument Evidence",
+    "words": ["argument", "evidence", "fact", "prove"],
+    "schema": "Education"
+  },
+  {
+    "topic_id": 45,
+    "topic_name": "Game Team",
+    "words": ["game", "team", "play", "player"],
+    "schema": "Sports"
+  },
+  {
+    "topic_id": 46,
+    "topic_name": "Line Number",
+    "words": ["line", "number", "case", "set"],
+    "schema": null
+  },
+  {
+    "topic_id": 48,
+    "topic_name": "Like Thing",
+    "words": ["like", "want", "thing", "know"],
+    "schema": null
+  },
+  {
+    "topic_id": 49,
+    "topic_name": "Available Support",
+    "words": ["available", "support", "graphic", "software"],
+    "schema": "Technology"
+  }
+]

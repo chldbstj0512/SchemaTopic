@@ -6,8 +6,6 @@ from typing import List, Dict, Any, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
-DEFAULT_REFINED_WORDS_N = 10
-
 
 def load_topic_words_from_file(path: str) -> List[List[str]]:
     topic_words = []
@@ -92,152 +90,65 @@ def parse_schema_labels(schema_text: str) -> List[str]:
     return labels
 
 
-def count_deleted_topics(delete_text: str) -> int:
-    deleted = set()
-    for line in delete_text.splitlines():
-        line = line.strip()
-        if line.startswith("- Topic "):
-            try:
-                idx = int(line.split("- Topic ", 1)[1].split()[0])
-                deleted.add(idx)
-            except Exception:
-                pass
-    return len(deleted)
+def filter_surviving_topics_by_verdict(
+    topic_words: List[List[str]],
+    scores_json: Any,
+) -> List[Dict[str, Any]]:
+    """
+    STEP2 JSON: each topic has a single decision, "keep" or "delete".
+    Prune a topic if its decision is "delete".
+    """
+    if not isinstance(scores_json, list):
+        return [
+            {"topic_id": i, "words": words}
+            for i, words in enumerate(topic_words)
+        ]
 
-
-def postprocess_final_topics(final_topics, refined_words_n: int):
-    if not isinstance(final_topics, list):
-        return final_topics
-
-    cleaned = []
-
-    for item in final_topics:
+    deleted_ids = set()
+    kept_topic_names = {}
+    for item in scores_json:
         if not isinstance(item, dict):
             continue
-
-        topic_id = item.get("topic_id", None)
+        tid = item.get("topic_id", None)
+        decision = (item.get("decision") or "").strip().lower()
         topic_name = str(item.get("topic_name", "")).strip()
-        words = item.get("words", [])
-
-        if topic_id is None:
-            continue
-        if not topic_name:
-            continue
-        if not isinstance(words, list):
-            continue
-
-        cleaned_words = []
-        seen_words = set()
-        for w in words:
-            w = str(w).strip()
-            if not w:
-                continue
-            wl = w.lower()
-            if wl in seen_words:
-                continue
-            seen_words.add(wl)
-            cleaned_words.append(w)
-
-        cleaned_words = cleaned_words[:refined_words_n]
-        if len(cleaned_words) < 3:
-            continue
-
-        cleaned.append(
-            {
-                "topic_id": topic_id,
-                "topic_name": topic_name,
-                "words": cleaned_words,
-            }
-        )
-
-    cleaned.sort(key=lambda x: x["topic_id"])
-    return cleaned
-
-
-def postprocess_schema_json(schema_json, schema_labels: List[str], refined_words_n: int):
-    if not isinstance(schema_json, list):
-        return schema_json
-
-    valid_schema = set([x.lower() for x in schema_labels])
-    cleaned = []
-
-    for item in schema_json:
-        if not isinstance(item, dict):
-            continue
-
-        schema = str(item.get("schema", "")).strip()
-        topic_name = str(item.get("topic_name", "")).strip()
-        words = item.get("words", [])
-
-        if not schema or not topic_name or not isinstance(words, list):
-            continue
-        if schema.lower() not in valid_schema:
-            continue
-
-        cleaned_words = []
-        seen_words = set()
-        for w in words:
-            w = str(w).strip()
-            if not w:
-                continue
-            wl = w.lower()
-            if wl in seen_words:
-                continue
-            seen_words.add(wl)
-            cleaned_words.append(w)
-
-        cleaned_words = cleaned_words[:refined_words_n]
-        if len(cleaned_words) < 3:
-            continue
-
-        cleaned.append(
-            {
-                "schema": schema,
-                "topic_name": topic_name,
-                "words": cleaned_words,
-            }
-        )
-
-    return cleaned
-
-
-def parse_deleted_topic_ids(delete_text: str) -> set:
-    """STEP2 DELETE 출력에서 삭제 대상 topic index 추출. '- Topic k' 또는 '- Topic k: word1, ...' 형식 모두 처리."""
-    deleted = set()
-    for line in delete_text.splitlines():
-        line = line.strip()
-        if not line.startswith("- Topic "):
+        if tid is None:
             continue
         try:
-            rest = line.split("- Topic ", 1)[1].strip()
-            first_token = rest.split()[0].rstrip(":")  # "5" or "5:" -> "5"
-            idx = int(first_token)
-            deleted.add(idx)
-        except Exception:
-            pass
-    return deleted
-
-
-def filter_surviving_topics(topic_words: List[List[str]], delete_text: str) -> List[Dict[str, Any]]:
-    deleted_ids = parse_deleted_topic_ids(delete_text)
+            tid_int = int(tid)
+        except (TypeError, ValueError):
+            continue
+        if tid_int < 0 or tid_int >= len(topic_words):
+            continue
+        if decision == "delete":
+            deleted_ids.add(tid_int)
+            continue
+        if decision == "keep" and topic_name:
+            kept_topic_names[tid_int] = topic_name
 
     surviving = []
     for i, words in enumerate(topic_words):
         if i in deleted_ids:
             continue
-        surviving.append({
-            "topic_id": i,
-            "words": words,
-        })
+        item = {"topic_id": i, "words": words}
+        if i in kept_topic_names:
+            item["topic_name"] = kept_topic_names[i]
+        surviving.append(item)
     return surviving
 
 
 def format_surviving_topics(surviving_topics: List[Dict[str, Any]]) -> str:
     lines = []
     for item in surviving_topics:
-        lines.append(f"Topic {item['topic_id']}: {', '.join(item['words'])}")
+        suggested_name = str(item.get("topic_name", "")).strip()
+        if suggested_name:
+            lines.append(
+                f"Topic {item['topic_id']} (suggested name: {suggested_name}): {', '.join(item['words'])}"
+            )
+        else:
+            lines.append(f"Topic {item['topic_id']}: {', '.join(item['words'])}")
     return "\n".join(lines)
-# ---------------- STEP 1 ----------------
+# ---------------- STEP 1: Schema generation (original) ----------------
 def build_schema_prompt(topic_words: List[List[str]]) -> List[Dict[str, str]]:
     topics_text = format_topics(topic_words)
 
@@ -260,7 +171,6 @@ Return the criterion explanation together with the schema.
 Rules:
 - The criterion must be supported by the topic words.
 - The schema labels must be broad and non-redundant.
-- Return 1 to 12 schema labels.
 - Keep the explanation short.
 - No extra text.
 
@@ -279,66 +189,19 @@ SCHEMA:
         {"role": "user", "content": user},
     ]
 
-# ---------------- STEP 2 ----------------
-def build_delete_prompt(
+# ---------------- STEP 2: Topic quality scoring + prune ----------------
+def build_topic_pruning_prompt(
     topic_words: List[List[str]],
+    schema_text: str,
 ) -> List[Dict[str, str]]:
     topics_text = format_topics(topic_words)
+    n_topics = len(topic_words)
 
     system = (
         "You are an expert in topic modeling. "
-        "Use only the given topic words and previous result. "
-        "Do not invent unsupported meanings."
-    )
-
-    user = f"""
-Topics:
-{topics_text}
-
-Task:
-Delete unnecessary topics.
-
-Delete a topic only if:
-- it is mostly junk,
-- it is too generic,
-- it has no clear semantic meaning,
-- it is a weak near-duplicate of another topic.
-
-Return the delete result and short explanation. For each deleted topic, also echo its topic words on the same line for easier post-processing.
-
-Rules:
-- Be conservative.
-- Keep interpretable topics.
-- No extra text.
-
-Return plain text only in this exact format:
-
-DELETE:
-- Topic k: <word1, word2, ...>
-- Topic m: <word1, word2, ...>
-or
-- None
-
-EXPLANATION:
-- <short explanation>
-"""
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
-
-# ---------------- STEP 3 ----------------
-def build_refine_and_assign_prompt(
-    surviving_topics: List[Dict[str, Any]],
-    surviving_topics_n: int,
-    schema_text: str,
-    refined_words_n: int,
-) -> List[Dict[str, str]]:
-    topics_text = format_surviving_topics(surviving_topics)
-
-    system = (
-        "You are an expert in topic modeling. "
-        "Use only the given topic words and schema labels as evidence. "
+        "Use only the given schema and topic words. "
+        "For each topic, assess interpretability and specificity, try to form a good short topic name, "
+        "and then make one pruning decision. "
         "Do not invent unsupported meanings."
     )
 
@@ -350,32 +213,113 @@ Topics:
 {topics_text}
 
 Task:
-For each topic:
-1. assign a short semantic topic name (1-2 words),
-2. remove unrelated or weak words,
-3. keep exactly one refined topic per input topic,
-4. assign the topic to the most appropriate schema,
-5. return the refinement result.
+For each topic, follow this order:
+1) assess interpretability: can it be clearly understood and fit the schema?
+2) assess specificity: does it represent a specific semantic theme rather than generic, vague, or mixed words?
+3) try to form a semantically natural topic name in one or two words
+4) then make one decision: "keep" or "delete"
+
+Output only:
+- topic_id
+- decision: "keep" or "delete"
+- topic_name: one or two words if "keep", otherwise null
+- reason: short justification reflecting interpretability, specificity, and naming quality
+
+Decision rule:
+- keep only if the topic is clearly interpretable, clearly specific, and can be given a good semantic topic_name
+- delete if it is unclear, generic, mixed, noisy, or cannot be named well
+
+Naming rule:
+- topic_name must be natural, concise, semantic, and grounded in the topic words
+- use one or two words only
+- do not use vague or placeholder-like names such as "Thing", "Way", "Point", "Line", "Time", "Topic", "People Talk", "Like Thing", "Time Make"
+- if no good topic_name is possible, choose "delete"
 
 Rules:
-- The number of topics is exactly {surviving_topics_n}; do not add or remove any topics.
-- Do not merge topics.
-- Prefer original words.
-- Do not add unsupported new words.
-- Use at most {refined_words_n} words per topic.
-- For schema assignment, you may use an existing schema label from the Schema section, or create a new schema label if none fits well.
-- Unused schema labels should be omitted naturally.
-- Each topic must have exactly one schema label.
-- Output one JSON object for every input topic.
-- Do not write any explanation before or after the JSON.
+- Do not decide "keep" first and then invent a weak name.
+- The topic_name is a test of interpretability, not a post-hoc decoration.
+- If you are not clearly confident, choose "delete".
+- There are exactly {n_topics} topics. Output exactly {n_topics} JSON objects with topic_id 0 to {n_topics - 1}.
+- No extra text before or after the JSON.
+
+JSON format:
+[
+  {{ "topic_id": 0, "decision": "keep", "topic_name": "Computer Hardware", "reason": "clear, specific, and naturally named as a hardware topic" }},
+  {{ "topic_id": 1, "decision": "delete", "topic_name": null, "reason": "too generic and cannot be given a good semantic name" }}
+]
+"""
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+# ---------------- STEP 3: Schema-Aware Topic Refinement ----------------
+def build_schema_aware_refine_prompt(
+    surviving_topics: List[Dict[str, Any]],
+    schema_text: str,
+    surviving_topics_n: int,
+) -> List[Dict[str, str]]:
+    topics_text = format_surviving_topics(surviving_topics)
+
+    system = (
+        "You are an expert in topic modeling. "
+        "Your role is limited to two actions: "
+        "(1) eliminate weak or unrelated words from each topic while keeping representative words that best express the topic's semantic core, and "
+        "(2) assign the topic to the most relevant schema label. "
+        "If a topic remains too weak or semantically unclear after word elimination, you may mark it as delete instead of assigning a schema. "
+        "Use the provided schema and surviving topics, but you may revise a better-fitting schema label when necessary. "
+        "Do not invent unsupported meanings."
+    )
+
+    user = f"""
+Schema:
+{schema_text}
+
+Surviving topics:
+{topics_text}
+
+Task:
+For each topic, do only these two things in order:
+
+1) Word elimination
+- Remove words that are weak, generic, conversational, redundant, filler-like, or not clearly relevant to the topic's semantic core.
+- Keep only informative and representative words.
+- Retain words that help a human understand the topic's main meaning.
+- Prefer original words only. Do not add new unsupported words.
+
+2) Schema assignment
+- Using the remaining words and the given topic_name, assign the topic to the single best schema label from the provided schema.
+- If a topic is still too weak or unclear after word elimination, mark it as delete and do not assign schema.
+- Use the given schema labels as the default, but permit only minimal deletion, addition, or modification when necessary to improve semantic accuracy.
+
+Output:
+Return only one JSON array.
+Each object must contain:
+- topic_id
+- topic_name
+- words
+- schema
+
+Rules:
+- Exactly {surviving_topics_n} topic objects.
+- Do not add, remove, split, or merge topics.
+- Keep the given topic_name unless it is clearly inconsistent with the remaining words.
+- Assign exactly one schema if kept; use null if deleted.
+- No explanation before or after the JSON.
 
 JSON format:
 [
   {{
     "topic_id": 0,
-    "topic_name": "short topic name",
-    "words": ["w1", "w2", "w3", "w4", "w5"],
-    "schema": "Schema Label"
+    "topic_name": "Computer Hardware",
+    "words": ["clipper", "irq", "isa", "centris", "ati"],
+    "schema": "Technology"
+  }},
+  {{
+    "topic_id": 1,
+    "topic_name": "Time Make",
+    "words": ["time", "make"],
+    "schema": null
   }}
 ]
 """
@@ -383,6 +327,7 @@ JSON format:
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+
 
 def call_llm(
     model,
@@ -421,82 +366,86 @@ def call_llm(
     )
     return extract_assistant_new_text(tokenizer, outputs, model_inputs)
 
-def postprocess_final_topics(final_topics, refined_words_n: int):
-    if not isinstance(final_topics, list):
-        return final_topics
+def postprocess_final_topics(final_topics):
+    grouped = []
+    invalid_schema_values = {"", "none", "null"}
 
-    cleaned = []
-
-    for item in final_topics:
-        if not isinstance(item, dict):
-            continue
-
-        topic_id = item.get("topic_id", None)
-        topic_name = str(item.get("topic_name", "")).strip()
-        words = item.get("words", [])
-        schema = str(item.get("schema", "")).strip()
-
-        if topic_id is None or not topic_name or not isinstance(words, list) or not schema:
-            continue
-
-        cleaned_words = []
-        seen_words = set()
-        for w in words:
-            w = str(w).strip()
-            if not w:
+    if isinstance(final_topics, dict):
+        groups = final_topics.get("schema", [])
+        if not isinstance(groups, list):
+            return {"schema": []}
+        for group in groups:
+            if not isinstance(group, dict):
                 continue
-            wl = w.lower()
-            if wl in seen_words:
-                continue
-            seen_words.add(wl)
-            cleaned_words.append(w)
-
-        cleaned_words = cleaned_words[:refined_words_n]
-        if len(cleaned_words) < 3:
-            continue
-
-        cleaned.append(
-            {
-                "topic_id": topic_id,
-                "topic_name": topic_name,
-                "words": cleaned_words,
-                "schema": schema,
-            }
-        )
-
-    cleaned.sort(key=lambda x: x["topic_id"])
-    return cleaned
-
-def postprocess_schema_json(schema_json, schema_labels: List[str], refined_words_n: int):
-    if not isinstance(schema_json, list):
-        return schema_json
-
-    valid_schema = {x.lower() for x in schema_labels}
-    cleaned = []
-
-    for item in schema_json:
-        if not isinstance(item, dict):
-            continue
-
-        schema = str(item.get("schema", "")).strip()
-        topics = item.get("topics", [])
-
-        if not schema or schema.lower() not in valid_schema or not isinstance(topics, list):
-            continue
-
-        cleaned_topics = []
-        seen_topic_names = set()
-
-        for topic in topics:
-            if not isinstance(topic, dict):
+            schema_raw = group.get("label", "")
+            schema = str(schema_raw).strip()
+            topics = group.get("topics", [])
+            if (
+                schema_raw is None
+                or schema.lower() in invalid_schema_values
+                or not isinstance(topics, list)
+            ):
                 continue
 
-            topic_name = str(topic.get("topic_name", "")).strip()
-            words = topic.get("words", [])
+            cleaned_topics = []
+            seen_topic_ids = set()
+            for item in topics:
+                if not isinstance(item, dict):
+                    continue
+                topic_id = item.get("topic_id", None)
+                topic_name = str(item.get("topic_name", "")).strip()
+                words = item.get("words", [])
+                if topic_id is None or not topic_name or not isinstance(words, list):
+                    continue
+                if topic_id in seen_topic_ids:
+                    continue
 
-            if not topic_name or not isinstance(words, list):
+                cleaned_words = []
+                seen_words = set()
+                for w in words:
+                    w = str(w).strip()
+                    if not w:
+                        continue
+                    wl = w.lower()
+                    if wl in seen_words:
+                        continue
+                    seen_words.add(wl)
+                    cleaned_words.append(w)
+
+                if len(cleaned_words) < 3:
+                    continue
+
+                cleaned_topics.append(
+                    {
+                        "topic_id": topic_id,
+                        "topic_name": topic_name,
+                        "words": cleaned_words,
+                    }
+                )
+                seen_topic_ids.add(topic_id)
+
+            cleaned_topics.sort(key=lambda x: x["topic_id"])
+            if cleaned_topics:
+                grouped.append({"label": schema, "topics": cleaned_topics})
+    elif isinstance(final_topics, list):
+        grouped_map = {}
+        schema_order = []
+        for item in final_topics:
+            if not isinstance(item, dict):
                 continue
-            if topic_name.lower() in seen_topic_names:
+
+            topic_id = item.get("topic_id", None)
+            topic_name = str(item.get("topic_name", "")).strip()
+            words = item.get("words", [])
+            schema_raw = item.get("schema", "")
+            schema = str(schema_raw).strip()
+            if (
+                topic_id is None
+                or not topic_name
+                or not isinstance(words, list)
+                or schema_raw is None
+                or schema.lower() in invalid_schema_values
+            ):
                 continue
 
             cleaned_words = []
@@ -511,35 +460,125 @@ def postprocess_schema_json(schema_json, schema_labels: List[str], refined_words
                 seen_words.add(wl)
                 cleaned_words.append(w)
 
-            cleaned_words = cleaned_words[:refined_words_n]
             if len(cleaned_words) < 3:
                 continue
 
-            cleaned_topics.append(
+            if schema not in grouped_map:
+                grouped_map[schema] = []
+                schema_order.append(schema)
+            grouped_map[schema].append(
                 {
+                    "topic_id": topic_id,
                     "topic_name": topic_name,
                     "words": cleaned_words,
                 }
             )
-            seen_topic_names.add(topic_name.lower())
 
-        if cleaned_topics:
-            cleaned.append(
+        for schema in schema_order:
+            topics = sorted(grouped_map[schema], key=lambda x: x["topic_id"])
+            if topics:
+                grouped.append({"label": schema, "topics": topics})
+    else:
+        return {"schema": []}
+
+    return {"schema": grouped}
+
+
+def flatten_schema_topics(schema_topics: Any) -> List[Dict[str, Any]]:
+    if not isinstance(schema_topics, dict):
+        return []
+
+    groups = schema_topics.get("schema", [])
+    if not isinstance(groups, list):
+        return []
+
+    invalid_schema_values = {"", "none", "null"}
+    flat_topics = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        schema_raw = group.get("label", "")
+        schema = str(schema_raw).strip()
+        topics = group.get("topics", [])
+        if (
+            schema_raw is None
+            or schema.lower() in invalid_schema_values
+            or not isinstance(topics, list)
+        ):
+            continue
+        for topic in topics:
+            if not isinstance(topic, dict):
+                continue
+            topic_id = topic.get("topic_id", None)
+            topic_name = str(topic.get("topic_name", "")).strip()
+            words = topic.get("words", [])
+            if topic_id is None or not topic_name or not isinstance(words, list):
+                continue
+            flat_topics.append(
                 {
+                    "topic_id": topic_id,
+                    "topic_name": topic_name,
+                    "words": words,
                     "schema": schema,
-                    "topics": cleaned_topics,
                 }
             )
 
-    return cleaned
+    flat_topics.sort(key=lambda x: x["topic_id"])
+    return flat_topics
+
+
+def build_schema_topic_words(schema_topics: Any) -> List[Dict[str, Any]]:
+    if not isinstance(schema_topics, dict):
+        return []
+
+    groups = schema_topics.get("schema", [])
+    if not isinstance(groups, list):
+        return []
+
+    invalid_schema_values = {"", "none", "null"}
+    schema_word_groups = []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        schema_raw = group.get("label", "")
+        schema = str(schema_raw).strip()
+        topics = group.get("topics", [])
+        if (
+            schema_raw is None
+            or schema.lower() in invalid_schema_values
+            or not isinstance(topics, list)
+        ):
+            continue
+
+        merged_words = []
+        seen_words = set()
+        for topic in topics:
+            if not isinstance(topic, dict):
+                continue
+            words = topic.get("words", [])
+            if not isinstance(words, list):
+                continue
+            for w in words:
+                w = str(w).strip()
+                if not w:
+                    continue
+                wl = w.lower()
+                if wl in seen_words:
+                    continue
+                seen_words.add(wl)
+                merged_words.append(w)
+
+        if merged_words:
+            schema_word_groups.append({"schema": schema, "words": merged_words})
+
+    return schema_word_groups
 
 def run_llm_four_step_schema_pipeline(
     topic_words: List[List[str]],
     model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct",
-    refined_words_n: int = DEFAULT_REFINED_WORDS_N,
     max_new_tokens_step1: int = 1200,
     max_new_tokens_step2: int = 1500,
-    max_new_tokens_step3: int = 4096,  # Llama 8B 등 많은 모델이 최대 생성 4096; 잘리면 --max_new_tokens_step3 8192 등으로 올리기(모델이 지원할 때)
+    max_new_tokens_step3: int = 4096,
     out_dir: str = "results/llm_refine",
     run_name: Optional[str] = None,
     device: str = "cuda",
@@ -559,7 +598,7 @@ def run_llm_four_step_schema_pipeline(
     model.eval()
     print("LLM loaded.")
 
-    # STEP 1
+    # STEP 1: Schema generation (original)
     step1_messages = build_schema_prompt(topic_words)
     step1_text = call_llm(
         model=model,
@@ -568,13 +607,15 @@ def run_llm_four_step_schema_pipeline(
         max_new_tokens=max_new_tokens_step1,
         device=device,
     )
-    schema_labels = parse_schema_labels(step1_text)
+    schema_labels_step1 = parse_schema_labels(step1_text)
 
     print("\n===== STEP 1: SCHEMA =====\n")
     print(step1_text)
+    initial_topic_ids = list(range(len(topic_words)))
+    print(f"[Topic Count] Initial topics: {len(initial_topic_ids)}")
 
-    # STEP 2
-    step2_messages = build_delete_prompt(topic_words)
+    # STEP 2: Topic quality scoring + prune
+    step2_messages = build_topic_pruning_prompt(topic_words, schema_text=step1_text)
     step2_text = call_llm(
         model=model,
         tokenizer=tokenizer,
@@ -583,19 +624,25 @@ def run_llm_four_step_schema_pipeline(
         device=device,
     )
 
-    print("\n===== STEP 2: DELETE =====\n")
+    print("\n===== STEP 2: SCORE + PRUNE =====\n")
     print(step2_text)
 
-    # STEP 3
-    surviving_topics = filter_surviving_topics(topic_words, step2_text)
+    step2_json = try_parse_json(step2_text)
+    surviving_topics = filter_surviving_topics_by_verdict(topic_words, step2_json)
+    surviving_ids_step2 = sorted(t["topic_id"] for t in surviving_topics)
+    deleted_ids_step2 = sorted(set(initial_topic_ids) - set(surviving_ids_step2))
+    if deleted_ids_step2:
+        print(f"[Step 2] Deleted {len(deleted_ids_step2)} topics:", deleted_ids_step2)
+    else:
+        print("[Step 2] Deleted 0 topics: []")
+    print(f"[Step 2] Remaining topics: {len(surviving_ids_step2)}")
 
-    step3_messages = build_refine_and_assign_prompt(
+    # STEP 3: Schema-aware refinement + assignment
+    step3_messages = build_schema_aware_refine_prompt(
         surviving_topics=surviving_topics,
-        surviving_topics_n = len(surviving_topics),
         schema_text=step1_text,
-        refined_words_n=refined_words_n,
+        surviving_topics_n=len(surviving_topics),
     )
-
     step3_text = call_llm(
         model=model,
         tokenizer=tokenizer,
@@ -604,19 +651,39 @@ def run_llm_four_step_schema_pipeline(
         device=device,
     )
     step3_json = try_parse_json(step3_text)
-    step3_json = postprocess_final_topics(step3_json, refined_words_n)
+    schema_topics = postprocess_final_topics(step3_json or {})
+    refined_topics = flatten_schema_topics(schema_topics)
+    schema_topic_words = build_schema_topic_words(schema_topics)
+    final_topic_ids = sorted(topic["topic_id"] for topic in refined_topics)
+    deleted_ids_step3 = sorted(set(surviving_ids_step2) - set(final_topic_ids))
 
-    print("\n===== STEP 3: REFINE + ASSIGN =====\n")
+    print("\n===== STEP 3: SCHEMA-AWARE REFINE + ASSIGN =====\n")
     print(step3_text)
+    if deleted_ids_step3:
+        print(f"[Step 3] Deleted {len(deleted_ids_step3)} topics:", deleted_ids_step3)
+    else:
+        print("[Step 3] Deleted 0 topics: []")
+    print(f"[Final] Remaining topics: {len(final_topic_ids)}")
+    print(
+        "[Summary] Initial:",
+        len(initial_topic_ids),
+        "| Step 2 deleted:",
+        len(deleted_ids_step2),
+        "| Step 3 deleted:",
+        len(deleted_ids_step3),
+        "| Final remaining:",
+        len(final_topic_ids),
+    )
 
     Path(out_dir).mkdir(parents=True, exist_ok=True)
-    suffix = run_name or "three_step_schema"
+    suffix = run_name or "four_step_schema"
 
     step1_path = os.path.join(out_dir, f"llm_{suffix}_step1_schema.txt")
-    step2_path = os.path.join(out_dir, f"llm_{suffix}_step2_delete.txt")
-    step3_raw_path = os.path.join(out_dir, f"llm_{suffix}_step3_refine_assign_raw.txt")
-    step3_json_path = os.path.join(out_dir, f"llm_{suffix}_step3_refine_assign.json")
-    words_path = os.path.join(out_dir, f"llm_{suffix}_words.txt")
+    step2_path = os.path.join(out_dir, f"llm_{suffix}_step2_scores.txt")
+    step3_path = os.path.join(out_dir, f"llm_{suffix}_step3_refine.txt")
+    schema_topics_json_path = os.path.join(out_dir, f"llm_{suffix}_schema_topics.json")
+    topic_words_path = os.path.join(out_dir, f"llm_{suffix}_topic_words.txt")
+    schema_topic_words_path = os.path.join(out_dir, f"llm_{suffix}_schema_topic_words.txt")
 
     with open(step1_path, "w", encoding="utf-8") as f:
         f.write(step1_text)
@@ -624,45 +691,56 @@ def run_llm_four_step_schema_pipeline(
     with open(step2_path, "w", encoding="utf-8") as f:
         f.write(step2_text)
 
-    with open(step3_raw_path, "w", encoding="utf-8") as f:
+    with open(step3_path, "w", encoding="utf-8") as f:
         f.write(step3_text)
 
-    with open(step3_json_path, "w", encoding="utf-8") as f:
-        json.dump(step3_json, f, ensure_ascii=False, indent=2)
+    with open(schema_topics_json_path, "w", encoding="utf-8") as f:
+        json.dump(schema_topics, f, ensure_ascii=False, indent=2)
 
-    with open(words_path, "w", encoding="utf-8") as f:
-        if isinstance(step3_json, list):
-            for topic in step3_json:
+    with open(topic_words_path, "w", encoding="utf-8") as f:
+        if isinstance(refined_topics, list):
+            for topic in refined_topics:
                 words = topic.get("words", [])
-                f.write(" ".join(words) + "\n")
+                f.write(f"Topic {topic['topic_id']}: {' '.join(words)}\n")
+
+    with open(schema_topic_words_path, "w", encoding="utf-8") as f:
+        for item in schema_topic_words:
+            f.write(f"{item['schema']}: {' '.join(item['words'])}\n")
 
     return {
         "step1_text": step1_text,
-        "schema_labels": schema_labels,
+        "schema_labels": schema_labels_step1,
+        "initial_topic_ids": initial_topic_ids,
         "step2_text": step2_text,
+        "step2_json": step2_json,
         "surviving_topics": surviving_topics,
+        "deleted_ids_step2": deleted_ids_step2,
         "step3_text": step3_text,
         "step3_json": step3_json,
+        "schema_topics": schema_topics,
+        "schema_topic_words": schema_topic_words,
+        "refined_topics": refined_topics,
+        "deleted_ids_step3": deleted_ids_step3,
+        "final_topic_ids": final_topic_ids,
         "step1_path": step1_path,
         "step2_path": step2_path,
-        "step3_raw_path": step3_raw_path,
-        "step3_json_path": step3_json_path,
-        "words_path": words_path,
+        "step3_path": step3_path,
+        "schema_topics_json_path": schema_topics_json_path,
+        "topic_words_path": topic_words_path,
+        "schema_topic_words_path": schema_topic_words_path,
     }
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Simple 4-step LLM topic schema pipeline"
+        description="3-step LLM topic pipeline: (1) schema (2) score+prune (3) refine+assign"
     )
     parser.add_argument("--topic_words_file", type=str, required=True)
     parser.add_argument("--model_name", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct")
-    parser.add_argument("--refined_words_n", type=int, default=DEFAULT_REFINED_WORDS_N)
-    parser.add_argument("--max_new_tokens_step1", type=int, default=1200)
-    parser.add_argument("--max_new_tokens_step2", type=int, default=1500)
-    parser.add_argument("--max_new_tokens_step3", type=int, default=4096,
-                        help="STEP3 JSON 최대 생성 토큰 수. Llama 8B 등은 4096 제한; 잘리면 모델이 허용하는 범위에서 올리기")
+    parser.add_argument("--max_new_tokens_step1", type=int, default=4096)
+    parser.add_argument("--max_new_tokens_step2", type=int, default=4096)
+    parser.add_argument("--max_new_tokens_step3", type=int, default=4096)
     parser.add_argument("--out_dir", type=str, default="results/llm_refine")
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda")
@@ -673,7 +751,6 @@ if __name__ == "__main__":
     result = run_llm_four_step_schema_pipeline(
         topic_words=topic_words,
         model_name=args.model_name,
-        refined_words_n=args.refined_words_n,
         max_new_tokens_step1=args.max_new_tokens_step1,
         max_new_tokens_step2=args.max_new_tokens_step2,
         max_new_tokens_step3=args.max_new_tokens_step3,
@@ -683,8 +760,9 @@ if __name__ == "__main__":
     )
 
     print("\nSaved:")
-    print("step1:", result["step1_path"])
-    print("step2:", result["step2_path"])
-    print("step3 raw:", result["step3_raw_path"])
-    print("step3 json:", result["step3_json_path"])
-    print("words:", result["words_path"])
+    print("step1 (schema):", result["step1_path"])
+    print("step2 (scores):", result["step2_path"])
+    print("step3 (refine):", result["step3_path"])
+    print("schema-topic json:", result["schema_topics_json_path"])
+    print("topic-word:", result["topic_words_path"])
+    print("schema-topic-word:", result["schema_topic_words_path"])
