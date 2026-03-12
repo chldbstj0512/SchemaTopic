@@ -264,7 +264,7 @@ def build_schema_aware_refine_prompt(
     system = (
         "You are an expert in topic modeling. "
         "Your role is limited to two actions: "
-        "(1) eliminate weak or unrelated words from each topic while keeping representative words that best express the topic's semantic core, and "
+        "(1) eliminate generic, discourse-level, and metadata-like words from each topic that do not contribute clearly to the topic's semantic core, and",
         "(2) assign the topic to the most relevant schema label. "
         "If a topic remains too weak or semantically unclear after word elimination, you may mark it as delete instead of assigning a schema. "
         "Use the provided schema and surviving topics, but you may revise a better-fitting schema label when necessary. "
