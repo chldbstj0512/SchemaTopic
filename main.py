@@ -66,7 +66,7 @@ def add_schema_arguments(parser):
         default=False,
         help="use k-keep mode: retain all topics (no delete) in LLM refinement",
     )
-    parser.add_argument("--model_name", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct")
+    parser.add_argument("--model_name", type=str, default="gpt-4o")
     parser.add_argument("--max_new_tokens_step1", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step2", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step3", type=int, default=4096)
@@ -119,7 +119,7 @@ def add_pipeline_arguments(parser):
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--lambda_anchor", type=float, default=1.0)
 
-    parser.add_argument("--model_name", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct")
+    parser.add_argument("--model_name", type=str, default="gpt-4o")
     parser.add_argument("--max_new_tokens_step1", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step2", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step3", type=int, default=4096)

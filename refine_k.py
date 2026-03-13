@@ -4,10 +4,12 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
+from dotenv import load_dotenv
+from openai import OpenAI
 
-MAX_LLM_NEW_TOKENS = 4096
+load_dotenv()
+
+MAX_LLM_NEW_TOKENS = 16384
 MISC_SCHEMA = "Misc"
 
 # ---------------------------------------------------------------------------
@@ -79,12 +81,6 @@ def format_topics(topic_words: List[List[str]], max_words: int = 20) -> str:
     return "\n".join(
         [f"Topic {i}: {', '.join(words[:max_words])}" for i, words in enumerate(topic_words)]
     )
-
-
-def extract_assistant_new_text(tokenizer, output_ids, model_inputs):
-    input_len = model_inputs["input_ids"].shape[1]
-    new_tokens = output_ids[0, input_len:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
 
 def _strip_trailing_and_clean_json(text: str) -> str:
@@ -531,11 +527,11 @@ JSON format:
 
 
 def call_llm(
-    model,
-    tokenizer,
+    client,
+    model_name: str,
     messages: List[Dict[str, str]],
     max_new_tokens: int,
-    device: str = "cuda",
+    **_,
 ) -> str:
     requested_max_new_tokens = int(max_new_tokens)
     clamped_max_new_tokens = min(requested_max_new_tokens, MAX_LLM_NEW_TOKENS)
@@ -547,44 +543,24 @@ def call_llm(
             )
         )
 
-    model_inputs = tokenizer.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        return_tensors="pt",
-        return_dict=True,
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        max_tokens=clamped_max_new_tokens,
+        temperature=0,
     )
-    model_inputs = {k: v.to(device) for k, v in model_inputs.items()}
-
-    try:
-        if hasattr(model, "generation_config") and getattr(model.generation_config, "max_length", None) is not None:
-            model.generation_config.max_length = None
-    except Exception:
-        pass
-    try:
-        if hasattr(model, "config") and getattr(model.config, "max_length", None) is not None:
-            model.config.max_length = None
-    except Exception:
-        pass
-
-    outputs = model.generate(
-        **model_inputs,
-        max_new_tokens=clamped_max_new_tokens,
-        do_sample=False,
-        pad_token_id=tokenizer.pad_token_id,
-        repetition_penalty=1.1,
-    )
-    return extract_assistant_new_text(tokenizer, outputs, model_inputs)
+    return response.choices[0].message.content.strip()
 
 
 def call_llm_until_valid_json(
-    model,
-    tokenizer,
+    client,
+    model_name: str,
     messages: List[Dict[str, str]],
     max_new_tokens: int,
     *,
     step_name: str,
     json_retry_attempts: int = 0,
-    device: str = "cuda",
+    **_,
 ):
     last_text = None
     last_json = None
@@ -604,11 +580,10 @@ def call_llm_until_valid_json(
             )
 
         text = call_llm(
-            model=model,
-            tokenizer=tokenizer,
+            client=client,
+            model_name=model_name,
             messages=messages,
             max_new_tokens=attempt_max_new_tokens,
-            device=device,
         )
         parsed_json = try_parse_json(text)
         if parsed_json is not None:
@@ -951,7 +926,7 @@ def build_schema_topic_words(schema_topics: Any) -> List[Dict[str, Any]]:
 
 def run_llm_four_step_schema_pipeline(
     topic_words: List[List[str]],
-    model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct",
+    model_name: str = "gpt-4o",
     max_new_tokens_step1: int = 1200,
     max_new_tokens_step2: int = 1500,
     max_new_tokens_step3: int = 4096,
@@ -961,27 +936,15 @@ def run_llm_four_step_schema_pipeline(
     device: str = "cuda",
 ) -> Dict[str, Any]:
 
-    print("Loading LLM:", model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    dtype = torch.float16 if device.startswith("cuda") else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-        torch_dtype=dtype,
-    ).to(device)
-    model.eval()
-    print("LLM loaded.")
+    print("Using OpenAI model:", model_name)
+    client = OpenAI()
 
     step1_messages = build_schema_prompt(topic_words)
     step1_text = call_llm(
-        model=model,
-        tokenizer=tokenizer,
+        client=client,
+        model_name=model_name,
         messages=step1_messages,
         max_new_tokens=max_new_tokens_step1,
-        device=device,
     )
     schema_labels_step1 = parse_schema_labels(step1_text)
 
@@ -992,13 +955,12 @@ def run_llm_four_step_schema_pipeline(
 
     step2_messages = build_topic_pruning_prompt(topic_words, schema_text=step1_text)
     step2_text, step2_json = call_llm_until_valid_json(
-        model=model,
-        tokenizer=tokenizer,
+        client=client,
+        model_name=model_name,
         messages=step2_messages,
         max_new_tokens=max_new_tokens_step2,
         step_name="Step 2",
         json_retry_attempts=json_retry_attempts,
-        device=device,
     )
 
     print("\n===== STEP 2: SCORE + PRUNE =====\n")
@@ -1020,13 +982,12 @@ def run_llm_four_step_schema_pipeline(
         step2_misc_topics=step2_misc_topics,
     )
     step3_text, step3_json = call_llm_until_valid_json(
-        model=model,
-        tokenizer=tokenizer,
+        client=client,
+        model_name=model_name,
         messages=step3_messages,
         max_new_tokens=max_new_tokens_step3,
         step_name="Step 3",
         json_retry_attempts=json_retry_attempts,
-        device=device,
     )
     schema_topics = postprocess_final_topics(step3_json or {})
     # step3에 misc 포함됐으면 이미 반영. 누락된 misc가 있으면 merge로 보완
@@ -1134,7 +1095,7 @@ def run_llm_four_step_schema_pipeline(
 
 def run_refine_from_file(
     topic_words_file: str,
-    model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct",
+    model_name: str = "gpt-4o",
     max_new_tokens_step1: int = 4096,
     max_new_tokens_step2: int = 4096,
     max_new_tokens_step3: int = 4096,
