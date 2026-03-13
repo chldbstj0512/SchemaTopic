@@ -94,11 +94,13 @@ def _strip_trailing_and_clean_json(text: str) -> str:
         "\nNote:", "\nNote ", "\n\nNote:",
         "\nLet me know", "\n\nLet me know",
         "\nI removed", "\nI've followed", "\nIf you need",
+        "\nNote: I have removed", "\nI have removed",
     ):
         if sep.lower() in text.lower():
             idx = text.lower().find(sep.lower())
             text = text[:idx].strip()
     text = re.sub(r',\s*//[^\n]*', '', text)
+    text = re.sub(r',\s*\.\.\.\s*\]', ']', text)
     return text.strip()
 
 
@@ -314,6 +316,30 @@ def filter_surviving_topics_by_verdict(
             item["topic_name"] = kept_topic_names[i]
         surviving.append(item)
     return surviving
+
+
+def _refined_list_to_schema(refined_topics: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """refined_topics (flat) -> schema_topics (grouped by schema)."""
+    grouped_map = {}
+    schema_order = []
+    for t in refined_topics:
+        if not isinstance(t, dict):
+            continue
+        schema = str(t.get("schema", MISC_SCHEMA)).strip() or MISC_SCHEMA
+        topic_id = t.get("topic_id")
+        topic_name = str(t.get("topic_name", "")).strip() or schema
+        words = t.get("words", [])
+        if topic_id is None or not isinstance(words, list):
+            continue
+        if schema not in grouped_map:
+            grouped_map[schema] = []
+            schema_order.append(schema)
+        grouped_map[schema].append({"topic_id": topic_id, "topic_name": topic_name, "words": words})
+    groups = []
+    for schema in schema_order:
+        topics = sorted(grouped_map[schema], key=lambda x: x["topic_id"])
+        groups.append({"label": schema, "topics": topics})
+    return {"schema": groups}
 
 
 def format_surviving_topics(surviving_topics: List[Dict[str, Any]], max_words: int = 20) -> str:
@@ -868,6 +894,22 @@ def run_llm_four_step_schema_pipeline(
     )
     schema_topics = postprocess_final_topics(step3_json or {})
     refined_topics = flatten_schema_topics(schema_topics)
+    if len(refined_topics) < len(surviving_topics):
+        existing_ids = {t["topic_id"] for t in refined_topics if isinstance(t, dict)}
+        for src in surviving_topics:
+            if not isinstance(src, dict):
+                continue
+            tid = src.get("topic_id")
+            if tid in existing_ids:
+                continue
+            refined_topics.append({
+                "topic_id": tid,
+                "topic_name": src.get("topic_name") or MISC_SCHEMA,
+                "words": list(src.get("words", []))[:20],
+                "schema": MISC_SCHEMA,
+            })
+        refined_topics.sort(key=lambda x: x.get("topic_id", 0))
+        schema_topics = _refined_list_to_schema(refined_topics)
     # Topic word validation (hallucination prevention): LLM 출력 사후 검증
     for t in refined_topics:
         if isinstance(t, dict) and t.get("words"):

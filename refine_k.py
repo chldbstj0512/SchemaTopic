@@ -94,11 +94,13 @@ def _strip_trailing_and_clean_json(text: str) -> str:
         "\nNote:", "\nNote ", "\n\nNote:",
         "\nLet me know", "\n\nLet me know",
         "\nI removed", "\nI've followed", "\nIf you need",
+        "\nNote: I have removed", "\nI have removed",
     ):
         if sep.lower() in text.lower():
             idx = text.lower().find(sep.lower())
             text = text[:idx].strip()
     text = re.sub(r',\s*//[^\n]*', '', text)
+    text = re.sub(r',\s*\.\.\.\s*\]', ']', text)
     return text.strip()
 
 
