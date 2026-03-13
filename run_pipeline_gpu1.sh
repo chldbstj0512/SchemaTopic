@@ -9,15 +9,15 @@
 #
 
 cd "$(dirname "$0")"
-PYTHON="${CONDA_PREFIX}/bin/python"
-[[ -x "$PYTHON" ]] || PYTHON="/home/ys0660/anaconda3/envs/ys0660/bin/python"
-[[ -x "$PYTHON" ]] || PYTHON="$(command -v python3)"
-[[ -x "$PYTHON" ]] || PYTHON="python"
+PYTHON="/home/hjhj97/miniconda3/envs/llm_itl/bin/python -u"
+[[ -x "${PYTHON%% *}" ]] || PYTHON="${CONDA_PREFIX}/bin/python -u"
+[[ -x "${PYTHON%% *}" ]] || PYTHON="$(command -v python3) -u"
+[[ -x "${PYTHON%% *}" ]] || PYTHON="python -u"
 DRY_RUN=false
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
 
 NUM_TOPICS=50
-LOG_DIR="results_final/experiment_logs"
+LOG_DIR="results/experiment_logs"
 STATUS_FILE="${LOG_DIR}/run_status_gpu1.txt"
 FAILED_FILE="${LOG_DIR}/failed_gpu1.txt"
 mkdir -p "$LOG_DIR"
@@ -27,7 +27,8 @@ NTM_MODELS=(ecrtm etm nstm nvdm plda)
 DATASETS=(DBpedia R8)
 SEEDS=(1)
 
-total=$(( ${#NTM_MODELS[@]} * ${#DATASETS[@]} * ${#SEEDS[@]} * 2 ))  # x2 for auto+keep
+MODES=(auto keep)
+total=$(( ${#NTM_MODELS[@]} * ${#DATASETS[@]} * ${#SEEDS[@]} * ${#MODES[@]} ))
 current=0
 success_count=0
 fail_count=0
@@ -55,8 +56,8 @@ echo "# 실패한 실험 (dataset model seed mode 시각)" > "$FAILED_FILE"
 
 echo "=========================================="
 echo "SchemaTopic Pipeline [GPU1] DBpedia, R8"
-echo "vanilla 1회 공유 -> auto + keep"
-echo "총 ${total}개 실험 (auto+keep)"
+echo "vanilla -> schema -> anchor (auto + keep)"
+echo "총 ${total}개 실험"
 echo "상태: $STATUS_FILE"
 echo "=========================================="
 
@@ -65,85 +66,40 @@ write_status "시작" "-"
 for model in "${NTM_MODELS[@]}"; do
   for dataset in "${DATASETS[@]}"; do
     for seed in "${SEEDS[@]}"; do
-      base="results_final/pipeline_${dataset}_${model}_${NUM_TOPICS}_seed${seed}"
-      out_vanilla="${base}/vanilla"
-      out_auto="${base}/auto"
-      out_keep="${base}/keep"
+      vanilla_out="results/pipeline_${dataset}_${model}_${NUM_TOPICS}_seed${seed}/vanilla"
+      for mode in "${MODES[@]}"; do
+        if [[ "$mode" == "keep" ]]; then
+          out_dir="results/pipeline_${dataset}_${model}_${NUM_TOPICS}_keep_seed${seed}"
+          extra_flag="--keep"
+          if [[ -f "${vanilla_out}/top_words.txt" ]]; then
+            extra_flag="--keep --vanilla_dir ${vanilla_out}"
+          fi
+        else
+          out_dir="results/pipeline_${dataset}_${model}_${NUM_TOPICS}_seed${seed}"
+          extra_flag=""
+        fi
 
-      # --- 0) Vanilla: 기존 결과에서 복사/재사용 (재실행 없음)
-      topic_words="${base}/vanilla/top_words.txt"
-      if [[ ! -f "$topic_words" ]]; then
-        echo "  [SKIP] vanilla not found: $topic_words (기존 결과에서 vanilla 복사 필요)"
-        ((fail_count++))
-        echo "  - ${dataset} ${model} seed${seed} (no vanilla) $(date '+%Y-%m-%d %H:%M:%S')" >> "$FAILED_FILE"
-        continue
-      fi
-      # Vanilla metrics.json: 없으면 eval로 생성
-      if [[ ! -f "${base}/vanilla/metrics.json" ]] && [[ -f "${base}/vanilla/model.pt" ]]; then
+        current=$((current + 1))
+        log="${LOG_DIR}/pipeline_${dataset}_${model}_${mode}_seed${seed}.log"
+        echo ""
+        echo "[${current}/${total}] ${dataset} ${model} seed${seed} [${mode}]"
+        cmd="$PYTHON main.py pipeline --model $model --dataset $dataset --num_topics $NUM_TOPICS --seed $seed --out_dir $out_dir --batch_size 8000 $extra_flag"
         if $DRY_RUN; then
-          echo "  [dry-run] $PYTHON main.py eval --checkpoint ${base}/vanilla"
+          echo "  $cmd"
         else
-          echo "  [vanilla] eval -> metrics.json"
-          $PYTHON main.py eval --checkpoint "${base}/vanilla" 2>&1 | tail -5
-        fi
-      fi
-
-      # --- 1) Auto: schema + anchor (vanilla 재사용, 출력 -> auto/)
-      current=$((current + 1))
-      log_auto="${LOG_DIR}/pipeline_${dataset}_${model}_auto_seed${seed}.log"
-      echo ""
-      echo "[${current}/${total}] ${dataset} ${model} seed${seed} [auto]"
-      mkdir -p "$out_auto"
-      cmd="$PYTHON main.py pipeline --model $model --dataset $dataset --num_topics $NUM_TOPICS --seed $seed --out_dir $out_auto --topic_words_file $topic_words"
-      if $DRY_RUN; then
-        echo "  $cmd"
-      else
-        eval "$cmd" 2>&1 | tee "$log_auto"
-        exit_code=${PIPESTATUS[0]}
-        if [[ "$exit_code" -eq 0 ]]; then
-          # Auto: 마지막에 eval
-          if ! $DRY_RUN && [[ -f "$out_auto/anchor/model.pt" ]]; then
-            echo "  [auto] eval -> anchor/metrics.json"
-            $PYTHON main.py eval --checkpoint "$out_auto/anchor" 2>&1 | tail -5
+          eval "$cmd" 2>&1 | tee "$log"
+          exit_code=${PIPESTATUS[0]}
+          if [[ "$exit_code" -eq 0 ]]; then
+            ((success_count++))
+            write_status "성공" "${dataset} ${model} seed${seed} ${mode}"
+          else
+            ((fail_count++))
+            echo "  - ${dataset} ${model} seed${seed} ${mode} $(date '+%Y-%m-%d %H:%M:%S')" >> "$FAILED_FILE"
+            write_status "실패" "${dataset} ${model} seed${seed} ${mode}"
           fi
-          ((success_count++))
-          write_status "성공" "${dataset} ${model} seed${seed} auto"
-        else
-          ((fail_count++))
-          echo "  - ${dataset} ${model} seed${seed} auto $(date '+%Y-%m-%d %H:%M:%S')" >> "$FAILED_FILE"
-          write_status "실패" "${dataset} ${model} seed${seed} auto"
-          continue
         fi
-      fi
 
-      # --- 2) Keep: schema + anchor (vanilla 재사용, 출력 -> keep/)
-      current=$((current + 1))
-      log_keep="${LOG_DIR}/pipeline_${dataset}_${model}_keep_seed${seed}.log"
-      echo ""
-      echo "[${current}/${total}] ${dataset} ${model} seed${seed} [keep] (vanilla 재사용)"
-      mkdir -p "$out_keep"
-      cmd_schema="$PYTHON main.py schema --topic_words_file $topic_words --keep --out_dir $out_keep/schema_50"
-      cmd_anchor="$PYTHON main.py anchor --schema_dir $out_keep/schema_50 --out_dir $out_keep/anchor --model $model --dataset $dataset --num_topics $NUM_TOPICS --seed $seed"
-      if $DRY_RUN; then
-        echo "  $cmd_schema"
-        echo "  $cmd_anchor"
-      else
-        (eval "$cmd_schema" && eval "$cmd_anchor") 2>&1 | tee "$log_keep"
-        exit_code=${PIPESTATUS[0]}
-        if [[ "$exit_code" -eq 0 ]]; then
-          # Keep: 마지막에 eval
-          if ! $DRY_RUN && [[ -f "$out_keep/anchor/model.pt" ]]; then
-            echo "  [keep] eval -> anchor/metrics.json"
-            $PYTHON main.py eval --checkpoint "$out_keep/anchor" 2>&1 | tail -5
-          fi
-          ((success_count++))
-          write_status "성공" "${dataset} ${model} seed${seed} keep"
-        else
-          ((fail_count++))
-          echo "  - ${dataset} ${model} seed${seed} keep $(date '+%Y-%m-%d %H:%M:%S')" >> "$FAILED_FILE"
-          write_status "실패" "${dataset} ${model} seed${seed} keep"
-        fi
-      fi
+      done
     done
   done
 done

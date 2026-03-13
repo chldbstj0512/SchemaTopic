@@ -1,5 +1,4 @@
 import argparse
-import json
 import os
 import shutil
 import tempfile
@@ -7,7 +6,6 @@ from argparse import Namespace
 from pathlib import Path
 
 from dataset import infer_dataset_name, list_available_datasets
-from llm_validation import TruncationError
 from topic_models import list_supported_topic_models
 from refine import run_refine_from_file
 from refine_k import run_refine_from_file as run_refine_from_file_keep
@@ -68,7 +66,7 @@ def add_schema_arguments(parser):
         default=False,
         help="use k-keep mode: retain all topics (no delete) in LLM refinement",
     )
-    parser.add_argument("--model_name", type=str, default="gpt-4o")
+    parser.add_argument("--model_name", type=str, default="gpt-5.2")
     parser.add_argument("--max_new_tokens_step1", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step2", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step3", type=int, default=4096)
@@ -121,7 +119,7 @@ def add_pipeline_arguments(parser):
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--lambda_anchor", type=float, default=1.0)
 
-    parser.add_argument("--model_name", type=str, default="gpt-4o")
+    parser.add_argument("--model_name", type=str, default="gpt-5.2")
     parser.add_argument("--max_new_tokens_step1", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step2", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step3", type=int, default=4096)
@@ -139,10 +137,10 @@ def add_pipeline_arguments(parser):
         help="use k-keep mode: retain all topics (no delete) in LLM refinement",
     )
     parser.add_argument(
-        "--topic_words_file",
+        "--vanilla_dir",
         type=str,
         default=None,
-        help="skip vanilla training; use this top_words file for schema (e.g. results/pipeline_X/vanilla/top_words.txt)",
+        help="reuse existing vanilla training results from this directory (skip Stage 1)",
     )
     return parser
 
@@ -397,17 +395,19 @@ def run_pipeline(args):
     )
     pipeline_root.mkdir(parents=True, exist_ok=True)
 
-    topic_words_file = getattr(args, "topic_words_file", None)
-    if topic_words_file:
-        topic_words_path = Path(topic_words_file)
-        if not topic_words_path.exists():
-            raise FileNotFoundError(
-                f"topic_words_file not found: {topic_words_file}\n"
-                f"Expected e.g. results/pipeline_{{dataset}}_{{model}}_50_seed{{seed}}/vanilla/top_words.txt"
-            )
-        print("\n=== Stage 1/3: Skip vanilla (use existing top words) ===")
-        print(f"  Using: {topic_words_path}")
-        stage1_result = {"top_words_path": str(topic_words_path)}
+    vanilla_dir = getattr(args, "vanilla_dir", None)
+    if vanilla_dir is not None:
+        vanilla_path = Path(vanilla_dir)
+        top_words_path = vanilla_path / "top_words.txt"
+        checkpoint_path = vanilla_path / "model.pt"
+        if not top_words_path.exists():
+            raise FileNotFoundError(f"--vanilla_dir: top_words.txt not found in {vanilla_path}")
+        print("\n=== Stage 1/3: Reusing existing vanilla results from", vanilla_path, "===")
+        stage1_result = {
+            "top_words_path": str(top_words_path),
+            "checkpoint_path": str(checkpoint_path) if checkpoint_path.exists() else None,
+            "out_dir": str(vanilla_path),
+        }
     else:
         print("\n=== Stage 1/3: Train vanilla topic model ===")
         stage1_args = build_train_namespace(
@@ -429,31 +429,11 @@ def run_pipeline(args):
         device=args.device,
         keep=getattr(args, "keep", False),
     )
-    try:
-        schema_result = run_schema(
-            schema_args,
-            output_parent_dir=pipeline_root,
-            folder_name="schema_{final_topic_count}",
-        )
-    except TruncationError as e:
-        anchor_dir = pipeline_root / "anchor"
-        anchor_dir.mkdir(parents=True, exist_ok=True)
-        metrics_path = anchor_dir / "metrics.json"
-        with open(metrics_path, "w", encoding="utf-8") as f:
-            json.dump({"truncated": True, "truncated_step": e.step_name}, f, indent=2)
-        # Copy step1/2/3 from .step2_tmp_* to schema_partial/ for inspection
-        schema_partial = pipeline_root / "schema_partial"
-        for tmp in pipeline_root.glob(".step2_tmp_*"):
-            if tmp.is_dir():
-                schema_partial.mkdir(parents=True, exist_ok=True)
-                for f in tmp.iterdir():
-                    if f.is_file():
-                        shutil.copy2(str(f), str(schema_partial / f.name))
-                print(f"Step outputs saved to {schema_partial}/ for inspection")
-                break
-        print(f"\n[ERROR] {e}")
-        print(f"Wrote {metrics_path} with truncated=True")
-        raise
+    schema_result = run_schema(
+        schema_args,
+        output_parent_dir=pipeline_root,
+        folder_name="schema_{final_topic_count}",
+    )
 
     print("\n=== Stage 3/3: Train anchor-guided topic model ===")
     anchor_arg_values = dict(vars(args))
