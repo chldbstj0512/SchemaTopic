@@ -17,7 +17,7 @@ DRY_RUN=false
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
 
 NUM_TOPICS=50
-LOG_DIR="results/experiment_logs"
+LOG_DIR="results_final/experiment_logs"
 STATUS_FILE="${LOG_DIR}/run_status_gpu1.txt"
 FAILED_FILE="${LOG_DIR}/failed_gpu1.txt"
 mkdir -p "$LOG_DIR"
@@ -65,7 +65,7 @@ write_status "시작" "-"
 for model in "${NTM_MODELS[@]}"; do
   for dataset in "${DATASETS[@]}"; do
     for seed in "${SEEDS[@]}"; do
-      base="results/pipeline_${dataset}_${model}_${NUM_TOPICS}_seed${seed}"
+      base="results_final/pipeline_${dataset}_${model}_${NUM_TOPICS}_seed${seed}"
       out_vanilla="${base}/vanilla"
       out_auto="${base}/auto"
       out_keep="${base}/keep"

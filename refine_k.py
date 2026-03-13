@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -579,6 +580,7 @@ def call_llm(
     messages: List[Dict[str, str]],
     max_new_tokens: int,
     device: str = "cuda",
+    llm_call_count: Optional[List[int]] = None,
 ) -> str:
     requested_max_new_tokens = int(max_new_tokens)
     clamped_max_new_tokens = min(requested_max_new_tokens, MAX_LLM_NEW_TOKENS)
@@ -616,6 +618,8 @@ def call_llm(
         pad_token_id=tokenizer.pad_token_id,
         repetition_penalty=1.1,
     )
+    if llm_call_count is not None:
+        llm_call_count[0] += 1
     return extract_assistant_new_text(tokenizer, outputs, model_inputs)
 
 
@@ -628,6 +632,7 @@ def call_llm_until_valid_json(
     step_name: str,
     json_retry_attempts: int = 0,
     device: str = "cuda",
+    llm_call_count: Optional[List[int]] = None,
 ):
     last_text = None
     last_json = None
@@ -652,6 +657,7 @@ def call_llm_until_valid_json(
             messages=messages,
             max_new_tokens=attempt_max_new_tokens,
             device=device,
+            llm_call_count=llm_call_count,
         )
         parsed_json = try_parse_json(text)
         if parsed_json is not None:
@@ -1001,6 +1007,7 @@ def _run_step3_chunked_retry(
     max_new_tokens: int,
     json_retry_attempts: int,
     device: str,
+    llm_call_count: Optional[List[int]] = None,
 ) -> tuple:
     """
     Truncation 발생 시 재시도: 토픽당 5단어, 청크별 분할 호출.
@@ -1032,6 +1039,7 @@ def _run_step3_chunked_retry(
             step_name=f"Step 3 (chunk {chunk_idx + 1}/{len(chunks)})",
             json_retry_attempts=json_retry_attempts,
             device=device,
+            llm_call_count=llm_call_count,
         )
         check_and_raise_if_truncated(
             chunk_text or "",
@@ -1059,6 +1067,9 @@ def run_llm_four_step_schema_pipeline(
     device: str = "cuda",
 ) -> Dict[str, Any]:
 
+    t0 = time.perf_counter()
+    llm_call_count = [0]
+
     print("Loading LLM:", model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     if tokenizer.pad_token is None:
@@ -1080,6 +1091,7 @@ def run_llm_four_step_schema_pipeline(
         messages=step1_messages,
         max_new_tokens=max_new_tokens_step1,
         device=device,
+        llm_call_count=llm_call_count,
     )
     step1_text = flatten_schema_text(step1_text)
     check_schema_step1_flat(step1_text)
@@ -1104,6 +1116,7 @@ def run_llm_four_step_schema_pipeline(
         step_name="Step 2",
         json_retry_attempts=json_retry_attempts,
         device=device,
+        llm_call_count=llm_call_count,
     )
     step2_path = os.path.join(out_dir, "step2.txt")
     with open(step2_path, "w", encoding="utf-8") as f:
@@ -1147,6 +1160,7 @@ def run_llm_four_step_schema_pipeline(
             step_name="Step 3",
             json_retry_attempts=json_retry_attempts,
             device=device,
+            llm_call_count=llm_call_count,
         )
         check_and_raise_if_truncated(
             step3_text or "",
@@ -1165,6 +1179,7 @@ def run_llm_four_step_schema_pipeline(
             max_new_tokens=max_new_tokens_step3,
             json_retry_attempts=json_retry_attempts,
             device=device,
+            llm_call_count=llm_call_count,
         )
         step3_used_retry = True
         print("[Step 3] Retry succeeded (chunked + 5 words per topic).")
@@ -1252,6 +1267,18 @@ def run_llm_four_step_schema_pipeline(
         for item in schema_topic_words:
             f.write(f"{item['schema']}: {' '.join(item['words'])}\n")
 
+    wall_clock_seconds = time.perf_counter() - t0
+    schema_meta_path = os.path.join(out_dir, "schema_meta.json")
+    with open(schema_meta_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "wall_clock_seconds": round(wall_clock_seconds, 2),
+                "llm_call_count": llm_call_count[0],
+            },
+            f,
+            indent=2,
+        )
+
     return {
         "step1_text": step1_text,
         "schema_labels": schema_labels_step1,
@@ -1273,6 +1300,7 @@ def run_llm_four_step_schema_pipeline(
         "schema_topics_json_path": schema_topics_json_path,
         "topic_words_path": topic_words_path,
         "schema_topic_words_path": schema_topic_words_path,
+        "schema_meta_path": schema_meta_path,
     }
 
 

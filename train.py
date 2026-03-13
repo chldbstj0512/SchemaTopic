@@ -4,6 +4,7 @@ Neural topic model training logic.
 Argument parsing is intentionally handled in `main.py` only.
 """
 import json
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -240,6 +241,7 @@ def save_model_artifacts(
     vocab_size,
     emsize,
     metrics,
+    wall_clock_seconds=None,
 ):
     checkpoint_path = out_path / "model.pt"
     metadata_path = out_path / "model_meta.json"
@@ -269,18 +271,17 @@ def save_model_artifacts(
         checkpoint_path,
     )
 
+    meta = {
+        "model_name": args.model,
+        "model_kwargs": model_kwargs,
+        "training_args": _namespace_to_serializable_dict(args),
+        "metrics": metrics,
+        "checkpoint_path": str(checkpoint_path),
+    }
+    if wall_clock_seconds is not None:
+        meta["wall_clock_seconds"] = round(wall_clock_seconds, 2)
     with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "model_name": args.model,
-                "model_kwargs": model_kwargs,
-                "training_args": _namespace_to_serializable_dict(args),
-                "metrics": metrics,
-                "checkpoint_path": str(checkpoint_path),
-            },
-            f,
-            indent=2,
-        )
+        json.dump(meta, f, indent=2)
 
     return checkpoint_path, metadata_path
 
@@ -490,6 +491,7 @@ def run_train(args):
             device=DEVICE,
         )
 
+    t0 = time.perf_counter()
     model = train_topic_model(
         model=model,
         optimizer=optimizer,
@@ -498,6 +500,7 @@ def run_train(args):
         device=DEVICE,
         extra_regularizer_fn=extra_regularizer_fn,
     )
+    wall_clock_seconds = time.perf_counter() - t0
 
     eval_outputs = evaluate_topic_model(
         model=model,
@@ -533,6 +536,7 @@ def run_train(args):
         vocab_size=vocab_size,
         emsize=emsize,
         metrics=metrics,
+        wall_clock_seconds=wall_clock_seconds,
     )
 
     print("\n--- Results saved to {} ---".format(out_path))

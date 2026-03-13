@@ -16,7 +16,7 @@ PYTHON="${CONDA_PREFIX}/bin/python"
 [[ -x "$PYTHON" ]] || PYTHON="$(command -v python3)"
 [[ -x "$PYTHON" ]] || PYTHON="python"
 MODE=${1:-gpu0}
-LOG_DIR="results/experiment_logs"
+LOG_DIR="results_final/experiment_logs"
 FAILED_FILE="${LOG_DIR}/failed_${MODE}.txt"
 NUM_TOPICS=50
 
@@ -51,8 +51,8 @@ while IFS= read -r line; do
   fi
   ((i++))
 
-  out_auto="results/pipeline_${dataset}_${model}_${NUM_TOPICS}_seed${seed}"
-  out_keep="results/pipeline_${dataset}_${model}_${NUM_TOPICS}_keep_seed${seed}"
+  out_auto="results_final/pipeline_${dataset}_${model}_${NUM_TOPICS}_seed${seed}"
+  out_keep="results_final/pipeline_${dataset}_${model}_${NUM_TOPICS}_keep_seed${seed}"
 
   if [[ "$run_mode" == "keep" ]]; then
     echo "[${i}/${count}] $dataset $model $seed_str [keep] (vanilla 재사용)"
