@@ -81,6 +81,10 @@ def add_schema_arguments(parser):
     parser.add_argument("--out_dir", type=str, default=None)
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda")
+
+    parser.add_argument("--skip_step1", action="store_true", default=False)
+    parser.add_argument("--skip_step2", action="store_true", default=False)
+    parser.add_argument("--skip_step3", action="store_true", default=False)
     return parser
 
 
@@ -144,6 +148,9 @@ def add_pipeline_arguments(parser):
         default=None,
         help="skip vanilla training; use this top_words file for schema (e.g. results/pipeline_X/vanilla/top_words.txt)",
     )
+    parser.add_argument("--skip_step1", action="store_true", default=False)
+    parser.add_argument("--skip_step2", action="store_true", default=False)
+    parser.add_argument("--skip_step3", action="store_true", default=False)
     return parser
 
 
@@ -223,6 +230,9 @@ def run_schema(args, output_parent_dir=None, folder_name=None):
             out_dir=args.out_dir,
             run_name=args.run_name,
             device=args.device,
+            use_step1=not args.skip_step1,
+            use_step2=not args.skip_step2,
+            use_step3=not args.skip_step3,
         )
 
     if output_parent_dir is None:
@@ -428,6 +438,9 @@ def run_pipeline(args):
         run_name=args.run_name,
         device=args.device,
         keep=getattr(args, "keep", False),
+        skip_step1=getattr(args, "skip_step1", False),
+        skip_step2=getattr(args, "skip_step2", False),
+        skip_step3=getattr(args, "skip_step3", False),
     )
     try:
         schema_result = run_schema(

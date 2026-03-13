@@ -866,6 +866,9 @@ def run_llm_four_step_schema_pipeline(
     out_dir: str = "results",
     run_name: Optional[str] = None,
     device: str = "cuda",
+    use_step1: bool = True,
+    use_step2: bool = True,
+    use_step3: bool = True,
 ) -> Dict[str, Any]:
 
     t0 = time.perf_counter()
@@ -885,18 +888,22 @@ def run_llm_four_step_schema_pipeline(
     model.eval()
     print("LLM loaded.")
 
-    step1_messages = build_schema_prompt(topic_words)
-    step1_text = call_llm(
-        model=model,
-        tokenizer=tokenizer,
-        messages=step1_messages,
-        max_new_tokens=max_new_tokens_step1,
-        device=device,
-        llm_call_count=llm_call_count,
-    )
-    step1_text = flatten_schema_text(step1_text)
-    check_schema_step1_flat(step1_text)
-    schema_labels_step1 = parse_schema_labels(step1_text)
+    if use_step1:
+        step1_messages = build_schema_prompt(topic_words)
+        step1_text = call_llm(
+            model=model,
+            tokenizer=tokenizer,
+            messages=step1_messages,
+            max_new_tokens=max_new_tokens_step1,
+            device=device,
+            llm_call_count=llm_call_count,
+        )
+        step1_text = flatten_schema_text(step1_text)
+        check_schema_step1_flat(step1_text)
+        schema_labels_step1 = parse_schema_labels(step1_text)
+    else:
+        step1_text = "SCHEMA:\n- Null"
+        schema_labels_step1 = ["Null"]
 
     print("\n===== STEP 1: SCHEMA =====\n")
     print(step1_text)
@@ -909,30 +916,42 @@ def run_llm_four_step_schema_pipeline(
         f.write(step1_text)
 
     step2_messages = build_topic_pruning_prompt(topic_words, schema_text=step1_text)
-    step2_text, step2_json = call_llm_until_valid_json(
-        model=model,
-        tokenizer=tokenizer,
-        messages=step2_messages,
-        max_new_tokens=max_new_tokens_step2,
-        step_name="Step 2",
-        json_retry_attempts=json_retry_attempts,
-        device=device,
-        llm_call_count=llm_call_count,
-    )
-    step2_path = os.path.join(out_dir, "step2.txt")
-    with open(step2_path, "w", encoding="utf-8") as f:
-        f.write(step2_text or "")
-    check_and_raise_if_truncated(
-        step2_text or "",
-        step_name="Step 2",
-        expected_count=len(topic_words),
-        parsed_json=step2_json,
-    )
+    if use_step2:
+        step2_messages = build_topic_pruning_prompt(topic_words, schema_text=step1_text)
+        step2_text, step2_json = call_llm_until_valid_json(
+            model=model,
+            tokenizer=tokenizer,
+            messages=step2_messages,
+            max_new_tokens=max_new_tokens_step2,
+            step_name="Step 2",
+            json_retry_attempts=json_retry_attempts,
+            device=device,
+            llm_call_count=llm_call_count,
+        )
+        step2_path = os.path.join(out_dir, "step2.txt")
+        with open(step2_path, "w", encoding="utf-8") as f:
+            f.write(step2_text or "")
+        check_and_raise_if_truncated(
+            step2_text or "",
+            step_name="Step 2",
+            expected_count=len(topic_words),
+            parsed_json=step2_json,
+        )
 
-    print("\n===== STEP 2: SCORE + PRUNE =====\n")
-    print(step2_text)
+        print("\n===== STEP 2: SCORE + PRUNE =====\n")
+        print(step2_text)
 
-    surviving_topics = filter_surviving_topics_by_verdict(topic_words, step2_json)
+        surviving_topics = filter_surviving_topics_by_verdict(topic_words, step2_json)
+    else:
+        step2_text = "[SKIPPED STEP 2]\n"
+        step2_json = None
+        step2_path = os.path.join(out_dir, "step2.txt")
+        with open(step2_path, "w", encoding="utf-8") as f:
+            f.write(step2_text)
+        surviving_topics = [
+            {"topic_id": i, "words": words}
+            for i, words in enumerate(topic_words)
+        ]
     surviving_ids_step2 = sorted(t["topic_id"] for t in surviving_topics)
     deleted_ids_step2 = sorted(set(initial_topic_ids) - set(surviving_ids_step2))
     if deleted_ids_step2:
@@ -941,32 +960,70 @@ def run_llm_four_step_schema_pipeline(
         print("[Step 2] Deleted 0 topics: []")
     print(f"[Step 2] Remaining topics: {len(surviving_ids_step2)}")
 
-    step3_messages = build_schema_aware_refine_prompt(
-        surviving_topics=surviving_topics,
-        schema_text=step1_text,
-        surviving_topics_n=len(surviving_topics),
-    )
-    step3_text, step3_json = call_llm_until_valid_json(
-        model=model,
-        tokenizer=tokenizer,
-        messages=step3_messages,
-        max_new_tokens=max_new_tokens_step3,
-        step_name="Step 3",
-        json_retry_attempts=json_retry_attempts,
-        device=device,
-        llm_call_count=llm_call_count,
-    )
-    step3_path = os.path.join(out_dir, "step3.txt")
-    with open(step3_path, "w", encoding="utf-8") as f:
-        f.write(step3_text or "")
-    check_and_raise_if_truncated(
-        step3_text or "",
-        step_name="Step 3",
-        expected_count=len(surviving_topics),
-        parsed_json=step3_json,
-    )
-    schema_topics = postprocess_final_topics(step3_json or {})
-    refined_topics = flatten_schema_topics(schema_topics)
+    if use_step3:
+        step3_messages = build_schema_aware_refine_prompt(
+            surviving_topics=surviving_topics,
+            schema_text=step1_text,
+            surviving_topics_n=len(surviving_topics),
+        )
+        step3_text, step3_json = call_llm_until_valid_json(
+            model=model,
+            tokenizer=tokenizer,
+            messages=step3_messages,
+            max_new_tokens=max_new_tokens_step3,
+            step_name="Step 3",
+            json_retry_attempts=json_retry_attempts,
+            device=device,
+            llm_call_count=llm_call_count,
+        )
+        step3_path = os.path.join(out_dir, "step3.txt")
+        with open(step3_path, "w", encoding="utf-8") as f:
+            f.write(step3_text or "")
+        check_and_raise_if_truncated(
+            step3_text or "",
+            step_name="Step 3",
+            expected_count=len(surviving_topics),
+            parsed_json=step3_json,
+        )
+
+        schema_topics = postprocess_final_topics(step3_json or {})
+        refined_topics = flatten_schema_topics(schema_topics)
+
+        if len(refined_topics) < len(surviving_topics):
+            existing_ids = {t["topic_id"] for t in refined_topics if isinstance(t, dict)}
+            for src in surviving_topics:
+                if not isinstance(src, dict):
+                    continue
+                tid = src.get("topic_id")
+                if tid in existing_ids:
+                    continue
+                refined_topics.append({
+                    "topic_id": tid,
+                    "topic_name": src.get("topic_name") or MISC_SCHEMA,
+                    "words": list(src.get("words", []))[:20],
+                    "schema": MISC_SCHEMA,
+                })
+            refined_topics.sort(key=lambda x: x.get("topic_id", 0))
+            schema_topics = _refined_list_to_schema(refined_topics)
+    else:
+        step3_text = "[SKIPPED STEP 3]\n"
+        step3_json = None
+        step3_path = os.path.join(out_dir, "step3.txt")
+        with open(step3_path, "w", encoding="utf-8") as f:
+            f.write(step3_text)
+
+        refined_topics = []
+        for src in surviving_topics:
+            if not isinstance(src, dict):
+                continue
+            refined_topics.append({
+                "topic_id": src.get("topic_id"),
+                "topic_name": src.get("topic_name") or MISC_SCHEMA,
+                "words": list(src.get("words", []))[:20],
+                "schema": MISC_SCHEMA,
+            })
+        refined_topics.sort(key=lambda x: x.get("topic_id", 0))
+        schema_topics = _refined_list_to_schema(refined_topics)
     if len(refined_topics) < len(surviving_topics):
         existing_ids = {t["topic_id"] for t in refined_topics if isinstance(t, dict)}
         for src in surviving_topics:
@@ -988,6 +1045,7 @@ def run_llm_four_step_schema_pipeline(
         if isinstance(t, dict) and t.get("words"):
             t["words"] = filter_stopwords(filter_noise_words(t["words"]))
     remove_overlapping_words_across_topics(refined_topics, min_words_after=1)
+    schema_topics = _refined_list_to_schema(refined_topics)
     for g in schema_topics.get("schema", []):
         if isinstance(g, dict):
             for t in g.get("topics", []):
@@ -1024,13 +1082,13 @@ def run_llm_four_step_schema_pipeline(
     schema_topic_words_path = os.path.join(out_dir, "schema_topic_words.txt")
 
     with open(step1_path, "w", encoding="utf-8") as f:
-        f.write(step1_text)
+        f.write(step1_text or "")
 
     with open(step2_path, "w", encoding="utf-8") as f:
-        f.write(step2_text)
+        f.write(step2_text or "")
 
     with open(step3_path, "w", encoding="utf-8") as f:
-        f.write(step3_text)
+        f.write(step3_text or "")
 
     with open(schema_topics_json_path, "w", encoding="utf-8") as f:
         json.dump(schema_topics, f, ensure_ascii=False, indent=2)
@@ -1092,6 +1150,9 @@ def run_refine_from_file(
     out_dir: str = "results",
     run_name: Optional[str] = None,
     device: str = "cuda",
+    use_step1: bool = True,
+    use_step2: bool = True,
+    use_step3: bool = True,
 ) -> Dict[str, Any]:
     topic_words = load_topic_words_from_file(topic_words_file)
     result = run_llm_four_step_schema_pipeline(
@@ -1104,6 +1165,9 @@ def run_refine_from_file(
         out_dir=out_dir,
         run_name=run_name,
         device=device,
+        use_step1=use_step1,
+        use_step2=use_step2,
+        use_step3=use_step3,
     )
     print("\nSaved:")
     print("step1 (schema):", result["step1_path"])
