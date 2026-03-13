@@ -7,6 +7,9 @@ from typing import List, Dict, Any, Optional
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
+from llm_validation import check_and_raise_if_truncated, check_schema_step1_flat, TruncationError
+from tool import filter_stopwords
+
 MAX_LLM_NEW_TOKENS = 4096
 MISC_SCHEMA = "Misc"
 
@@ -275,6 +278,39 @@ def parse_schema_labels(schema_text: str) -> List[str]:
     return labels
 
 
+def flatten_schema_text(schema_text: str) -> str:
+    """Remove hierarchy: keep only top-level labels. One label per line. No indented sub-items."""
+    lines = schema_text.splitlines()
+    result = []
+    in_schema = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            result.append(line)
+            continue
+        if stripped.upper() == "SCHEMA:":
+            in_schema = True
+            result.append(line)
+            continue
+        if stripped.upper() == "CRITERION:":
+            in_schema = False
+            result.append(line)
+            continue
+        if in_schema:
+            # Top-level only: 0~2 spaces before "- ". Skip indented sub-items (4+ spaces).
+            indent = len(line) - len(line.lstrip())
+            if indent <= 2 and stripped.startswith("- "):
+                label = stripped[2:].strip()
+                # "Parent: Child" -> keep "Parent" only
+                if ":" in label:
+                    label = label.split(":")[0].strip()
+                if label:
+                    result.append("- " + label)
+            continue
+        result.append(line)
+    return "\n".join(result)
+
+
 def filter_surviving_topics_by_verdict(
     topic_words: List[List[str]],
     scores_json: Any,
@@ -375,6 +411,7 @@ Rules:
 - Do not make topic-specific labels, make schema.
 - Avoid redundant or overlapping labels.
 - Each schema label must be a single line.
+- Flat schema only. No sub-items, no hierarchy.
 
 Output:
 CRITERION:
@@ -423,11 +460,11 @@ Output only:
 - topic_id
 - decision: "keep" or "delete"
 - topic_name: one or two words if "keep", otherwise null
-- reason: cite 1–3 key words from the topic and explain how they led to topic_name (keep) or why they are unclear (delete). No generic phrases.
 
 Decision rule:
 - keep if the topic is interpretable and can be given a reasonable semantic topic_name
 - delete only if it is clearly unclear, generic, mixed, noisy, or cannot be named at all
+- delete topics that are dominated by stopwords
 
 Naming rule:
 - topic_name must describe that topic's words only (topic_id N → name for topic N's words)
@@ -438,19 +475,18 @@ Rules:
 - When in doubt, prefer "keep". Delete only when clearly problematic.
 - Exactly {n_topics} topics. Output {n_topics} JSON objects, topic_id 0 to {n_topics - 1}.
 - No extra text.
-WARNING: Do NOT use ..., {...}, or // comments. Output exactly {n_topics} complete JSON objects. No truncation.
 
-JSON format:
-[
-  {{ "topic_id": 0, "decision": "keep", "topic_name": "Motorcycle Safety", "reason": "bike, helmet, insurance → riding safety" }},
-  {{ "topic_id": 1, "decision": "delete", "topic_name": null, "reason": "mw, mz, vv → noise, no coherent theme" }}
-]
+CRITICAL - NO TRUNCATION:
+- NEVER use ellipsis (...), "etc", or "and so on" in the JSON array.
+- Output must contain exactly {n_topics} complete objects. No omission.
+
+Output compact single-line JSON. No extra whitespace. Example:
+[{{"topic_id":0,"decision":"keep","topic_name":"Motorcycle Safety"}},{{"topic_id":1,"decision":"delete","topic_name":null}}]
 """
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-
 
 def build_schema_aware_refine_prompt(
     surviving_topics: List[Dict[str, Any]],
@@ -482,10 +518,11 @@ For each topic:
 1) Word elimination
 - Use topic_name only when it matches the words; if it contradicts the words, replace topic_name.
 - Keep words that form a tight semantic cluster. Remove only words that dilute the topic's focus or feel unrelated.
+- Remove stopwords that harm the topic's meaning.
 - Remove only words that are clearly generic, meaningless, filler-like, or inconsistent with the topic.
 - Remove 1-2 character tokens only if they are not meaningful abbreviations or domain terms.
 - If a word overlaps with another topic, remove it only when it is not important for this topic.
-- Keep enough words to preserve the topic's meaning. Do not over-prune.
+- Keep 6–8 most representative words per topic. Do NOT exceed 8 words per topic.
 
 2) Schema assignment
 - Assign the single best schema label using topic_name and the remaining words.
@@ -498,16 +535,15 @@ Output rules:
 - Replace topic_name if it contradicts the words.
 - Use exactly one schema if kept, or null if deleted.
 - No explanation before or after the JSON.
-WARNING: Do NOT use ..., {{...}}, or // comments. Output exactly {surviving_topics_n} complete objects. No truncation.
 
-JSON format:
+CRITICAL - NO TRUNCATION:
+- NEVER use ellipsis (...), "etc", or "and so on" in the JSON array.
+- Output must contain exactly {surviving_topics_n} complete objects. No omission.
+
+Output compact JSON array. One object per line inside []. Example:
 [
-  {{
-    "topic_id": 0,
-    "topic_name": "example topic",
-    "words": ["word1", "word2", "word3"],
-    "schema": "example schema"
-  }}
+{{"topic_id":0,"topic_name":"example","words":["w1","w2","w3"],"schema":"label"}},
+{{"topic_id":1,"topic_name":"other","words":["a","b","c"],"schema":"label"}}
 ]
 """
 
@@ -848,12 +884,19 @@ def run_llm_four_step_schema_pipeline(
         max_new_tokens=max_new_tokens_step1,
         device=device,
     )
+    step1_text = flatten_schema_text(step1_text)
+    check_schema_step1_flat(step1_text)
     schema_labels_step1 = parse_schema_labels(step1_text)
 
     print("\n===== STEP 1: SCHEMA =====\n")
     print(step1_text)
     initial_topic_ids = list(range(len(topic_words)))
     print(f"[Topic Count] Initial topics: {len(initial_topic_ids)}")
+
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    step1_path = os.path.join(out_dir, "step1.txt")
+    with open(step1_path, "w", encoding="utf-8") as f:
+        f.write(step1_text)
 
     step2_messages = build_topic_pruning_prompt(topic_words, schema_text=step1_text)
     step2_text, step2_json = call_llm_until_valid_json(
@@ -864,6 +907,15 @@ def run_llm_four_step_schema_pipeline(
         step_name="Step 2",
         json_retry_attempts=json_retry_attempts,
         device=device,
+    )
+    step2_path = os.path.join(out_dir, "step2.txt")
+    with open(step2_path, "w", encoding="utf-8") as f:
+        f.write(step2_text or "")
+    check_and_raise_if_truncated(
+        step2_text or "",
+        step_name="Step 2",
+        expected_count=len(topic_words),
+        parsed_json=step2_json,
     )
 
     print("\n===== STEP 2: SCORE + PRUNE =====\n")
@@ -892,6 +944,15 @@ def run_llm_four_step_schema_pipeline(
         json_retry_attempts=json_retry_attempts,
         device=device,
     )
+    step3_path = os.path.join(out_dir, "step3.txt")
+    with open(step3_path, "w", encoding="utf-8") as f:
+        f.write(step3_text or "")
+    check_and_raise_if_truncated(
+        step3_text or "",
+        step_name="Step 3",
+        expected_count=len(surviving_topics),
+        parsed_json=step3_json,
+    )
     schema_topics = postprocess_final_topics(step3_json or {})
     refined_topics = flatten_schema_topics(schema_topics)
     if len(refined_topics) < len(surviving_topics):
@@ -913,13 +974,13 @@ def run_llm_four_step_schema_pipeline(
     # Topic word validation (hallucination prevention): LLM 출력 사후 검증
     for t in refined_topics:
         if isinstance(t, dict) and t.get("words"):
-            t["words"] = filter_noise_words(t["words"])
+            t["words"] = filter_stopwords(filter_noise_words(t["words"]))
     remove_overlapping_words_across_topics(refined_topics, min_words_after=1)
     for g in schema_topics.get("schema", []):
         if isinstance(g, dict):
             for t in g.get("topics", []):
                 if isinstance(t, dict) and t.get("words"):
-                    t["words"] = filter_noise_words(t["words"])
+                    t["words"] = filter_stopwords(filter_noise_words(t["words"]))
     schema_topic_words = build_schema_topic_words(schema_topics)
     final_topic_ids = sorted(topic["topic_id"] for topic in refined_topics)
     deleted_ids_step3 = sorted(set(surviving_ids_step2) - set(final_topic_ids))

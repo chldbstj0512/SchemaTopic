@@ -620,4 +620,12 @@ def run_eval_from_checkpoint(checkpoint_path, data_dir=None, root_dir=None):
 
     print("\n--- Evaluation results ---")
     print(json.dumps(metrics, indent=2))
+
+    # Save metrics.json to checkpoint directory
+    ckpt_dir = ckpt.parent
+    metrics_path = ckpt_dir / "metrics.json"
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2)
+    print("Saved metrics to:", metrics_path)
+
     return {"metrics": metrics, "top_words": top_words}
