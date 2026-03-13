@@ -88,6 +88,9 @@ def extract_assistant_new_text(tokenizer, output_ids, model_inputs):
 
 def try_parse_json(text: str):
     text = text.strip()
+    for sep in ("\nNote:", "\nNote ", "\n\nNote:"):
+        if sep in text:
+            text = text.split(sep, 1)[0].strip()
     try:
         return json.loads(text)
     except Exception:
@@ -411,6 +414,7 @@ Rules:
 - When in doubt, prefer "keep". Delete only when clearly problematic.
 - Exactly {n_topics} topics. Output {n_topics} JSON objects, topic_id 0 to {n_topics - 1}.
 - No extra text.
+WARNING: Do NOT repeat the same topic_name. Do NOT truncate. Output complete JSON only.
 
 JSON format:
 [
@@ -475,6 +479,7 @@ For each topic:
 
 1) Word elimination
 - Use topic_name only when it matches the words; if it contradicts the words, replace topic_name.
+- Keep words that form a tight semantic cluster. Remove only words that dilute the topic's focus or feel unrelated.
 - Remove only words that are clearly generic, meaningless, filler-like, or inconsistent with the topic.
 - Remove 1-2 character tokens only if they are not meaningful abbreviations or domain terms.
 - If a word overlaps with another topic, remove it only when it is not important for this topic.
@@ -491,6 +496,7 @@ Output rules:
 - Replace topic_name if it contradicts the words.
 - Use exactly one schema if kept, or null if deleted.
 - No explanation before or after the JSON.
+WARNING: schema null → Misc. No "Note:" or extra text. Output complete JSON only.
 
 JSON format:
 [
@@ -550,6 +556,7 @@ def call_llm(
         max_new_tokens=clamped_max_new_tokens,
         do_sample=False,
         pad_token_id=tokenizer.pad_token_id,
+        repetition_penalty=1.1,
     )
     return extract_assistant_new_text(tokenizer, outputs, model_inputs)
 
@@ -739,11 +746,9 @@ def postprocess_final_topics(final_topics):
             schema_raw = group.get("label", "")
             schema = str(schema_raw).strip()
             topics = group.get("topics", [])
-            if (
-                schema_raw is None
-                or schema.lower() in invalid_schema_values
-                or not isinstance(topics, list)
-            ):
+            if schema_raw is None or schema.lower() in invalid_schema_values:
+                schema = MISC_SCHEMA
+            if not isinstance(topics, list):
                 continue
 
             cleaned_topics = []
@@ -800,15 +805,11 @@ def postprocess_final_topics(final_topics):
             words = item.get("words", [])
             schema_raw = item.get("schema", "")
             schema = str(schema_raw).strip()
+            if schema_raw is None or schema.lower() in invalid_schema_values:
+                schema = MISC_SCHEMA
             if schema.lower() == MISC_SCHEMA.lower():
                 topic_name = topic_name or MISC_SCHEMA
-            if (
-                topic_id is None
-                or not topic_name
-                or not isinstance(words, list)
-                or schema_raw is None
-                or schema.lower() in invalid_schema_values
-            ):
+            if topic_id is None or not topic_name or not isinstance(words, list):
                 continue
 
             cleaned_words = []
@@ -863,11 +864,9 @@ def flatten_schema_topics(schema_topics: Any) -> List[Dict[str, Any]]:
         schema_raw = group.get("label", "")
         schema = str(schema_raw).strip()
         topics = group.get("topics", [])
-        if (
-            schema_raw is None
-            or schema.lower() in invalid_schema_values
-            or not isinstance(topics, list)
-        ):
+        if schema_raw is None or schema.lower() in invalid_schema_values:
+            schema = MISC_SCHEMA
+        if not isinstance(topics, list):
             continue
         for topic in topics:
             if not isinstance(topic, dict):
@@ -906,11 +905,9 @@ def build_schema_topic_words(schema_topics: Any) -> List[Dict[str, Any]]:
         schema_raw = group.get("label", "")
         schema = str(schema_raw).strip()
         topics = group.get("topics", [])
-        if (
-            schema_raw is None
-            or schema.lower() in invalid_schema_values
-            or not isinstance(topics, list)
-        ):
+        if schema_raw is None or schema.lower() in invalid_schema_values:
+            schema = MISC_SCHEMA
+        if not isinstance(topics, list):
             continue
 
         merged_words = []
