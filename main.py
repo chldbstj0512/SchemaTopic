@@ -73,7 +73,7 @@ def add_schema_arguments(parser):
     parser.add_argument(
         "--json_retry_attempts",
         type=int,
-        default=0,
+        default=2,
         help="retry malformed JSON responses for step2/step3 this many times",
     )
     parser.add_argument("--out_dir", type=str, default=None)
@@ -126,7 +126,7 @@ def add_pipeline_arguments(parser):
     parser.add_argument(
         "--json_retry_attempts",
         type=int,
-        default=0,
+        default=2,
         help="retry malformed JSON responses for step2/step3 this many times",
     )
     parser.add_argument("--device", type=str, default="cuda")

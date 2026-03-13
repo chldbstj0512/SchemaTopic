@@ -1,4 +1,5 @@
 import os
+import re
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -86,11 +87,23 @@ def extract_assistant_new_text(tokenizer, output_ids, model_inputs):
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
 
-def try_parse_json(text: str):
+def _strip_trailing_and_clean_json(text: str) -> str:
+    """Strip LLM trailing text and fix common invalid JSON patterns."""
     text = text.strip()
-    for sep in ("\nNote:", "\nNote ", "\n\nNote:"):
-        if sep in text:
-            text = text.split(sep, 1)[0].strip()
+    for sep in (
+        "\nNote:", "\nNote ", "\n\nNote:",
+        "\nLet me know", "\n\nLet me know",
+        "\nI removed", "\nI've followed", "\nIf you need",
+    ):
+        if sep.lower() in text.lower():
+            idx = text.lower().find(sep.lower())
+            text = text[:idx].strip()
+    text = re.sub(r',\s*//[^\n]*', '', text)
+    return text.strip()
+
+
+def try_parse_json(text: str):
+    text = _strip_trailing_and_clean_json(text)
     try:
         return json.loads(text)
     except Exception:
@@ -112,7 +125,7 @@ def try_parse_json(text: str):
         start = text.find("[")
         end = text.rfind("]")
         if start != -1 and end != -1 and start < end:
-            candidate = text[start : end + 1].strip()
+            candidate = _strip_trailing_and_clean_json(text[start : end + 1])
             return json.loads(candidate)
     except Exception:
         pass
@@ -414,7 +427,7 @@ Rules:
 - When in doubt, prefer "keep". Delete only when clearly problematic.
 - Exactly {n_topics} topics. Output {n_topics} JSON objects, topic_id 0 to {n_topics - 1}.
 - No extra text.
-WARNING: Do NOT repeat the same topic_name. Do NOT truncate. Output complete JSON only.
+WARNING: Do NOT use ..., {...}, or // comments. Output exactly {n_topics} complete JSON objects. No truncation.
 
 JSON format:
 [
@@ -496,7 +509,7 @@ Output rules:
 - Replace topic_name if it contradicts the words.
 - Use exactly one schema if kept, or null if deleted.
 - No explanation before or after the JSON.
-WARNING: schema null → Misc. No "Note:" or extra text. Output complete JSON only.
+WARNING: Do NOT use ..., {{...}}, or // comments. Output exactly {surviving_topics_n} complete objects. No truncation.
 
 JSON format:
 [
