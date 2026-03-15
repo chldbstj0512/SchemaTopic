@@ -22,6 +22,7 @@ from utils import (
 )
 
 
+# 프로젝트 최상위 = train.py 기준 상위 폴더. 데이터셋은 여기서 datasets/<이름> 으로 참조.
 ROOT = Path(__file__).resolve().parent
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if DEVICE.type == "cuda":
@@ -34,6 +35,7 @@ else:
 
 
 def load_training_data(root, data_dir):
+    """root: 프로젝트 최상위, data_dir: e.g. datasets/20News → root/datasets/20News"""
     data = load_topic_dataset(root / data_dir)
     train_bow = data["train_bow"]
     test_bow = data["test_bow"]
@@ -585,6 +587,15 @@ def run_eval_from_checkpoint(checkpoint_path, data_dir=None, root_dir=None):
         dataset = training_args.get("dataset", "20News")
         data_dir = str(Path("datasets") / dataset)
     data_dir = str(data_dir)
+
+    # 참조 경로가 없으면(절대경로/다른 환경) 프로젝트 기준 datasets/{dataset} 사용
+    candidate = root / data_dir
+    if not candidate.exists():
+        dataset_name = training_args.get("dataset", Path(data_dir).name or "20News")
+        fallback = Path("datasets") / dataset_name
+        if (root / fallback).exists():
+            data_dir = str(fallback)
+            print("Data path not found, using:", root / data_dir)
 
     print("Loading data from:", root / data_dir)
     data = load_training_data(root, data_dir)

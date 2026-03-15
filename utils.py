@@ -160,11 +160,11 @@ def run_palmetto_cv(root_dir, topics, temp_folder=None, timeout_per_topic=90, to
 PALMETTO_COHERENCE_MEASURES = ["C_V", "NPMI", "UCI", "UMass"]
 
 
-def get_topic_coherence_metrics(beta, training_set, vocabulary, topk=10, n_docs_for_coherence=2000, root_dir=None):
+def get_topic_coherence_metrics(beta, training_set, vocabulary, topk=10, n_docs_for_coherence=2000, root_dir=None, measures=None):
     """
-    C_V, NPMI, UCI, UMass coherence를 모두 계산.
-    - **기본(default)**: Gensim 사용 (학습 코퍼스 기준, 빠름).
-    - Palmetto 사용하려면: root_dir에 jar + wikipedia_bd 두고 환경변수 SCHEMATOPIC_USE_PALMETTO=1 설정.
+    C_V, NPMI, UCI, UMass coherence 계산.
+    - **기본(default)**: root_dir에 Palmetto(jar + wikipedia_bd)가 있으면 Palmetto 사용.
+    - measures: None이면 4종 전부, ["C_V"]면 C_V만 (빠른 평가용).
     Returns: dict with keys topic_coherence_cv, topic_coherence_npmi, topic_coherence_uci, topic_coherence_umass
     """
     if torch.is_tensor(beta):
@@ -179,21 +179,22 @@ def get_topic_coherence_metrics(beta, training_set, vocabulary, topk=10, n_docs_
         "topic_coherence_uci": None,
         "topic_coherence_umass": None,
     }
+    measures_to_run = measures if measures is not None else PALMETTO_COHERENCE_MEASURES
 
-    use_palmetto = os.environ.get("SCHEMATOPIC_USE_PALMETTO", "").strip().lower() in ("1", "true", "yes")
-    if use_palmetto and root_dir:
-        jar = os.path.join(root_dir, "palmetto-0.1.5-exec.jar")
-        wikipedia_bd = os.path.join(root_dir, "wikipedia_bd")
-        if os.path.isfile(jar) and os.path.isdir(wikipedia_bd):
-            print("Computing topic coherence with Palmetto (C_V, NPMI, UCI, UMass)...")
-            for measure in PALMETTO_COHERENCE_MEASURES:
-                val = run_palmetto_measure(root_dir, topics, measure=measure, topk=topk)
-                key = "topic_coherence_cv" if measure == "C_V" else "topic_coherence_npmi" if measure == "NPMI" else "topic_coherence_uci" if measure == "UCI" else "topic_coherence_umass"
-                out[key] = float(val) if val is not None else None
-            for k, v in out.items():
-                if v is not None:
-                    print("  %s: %s" % (k, round(v, 4)))
-            return out
+    jar = os.path.join(root_dir or "", "palmetto-0.1.5-exec.jar")
+    wikipedia_bd = os.path.join(root_dir or "", "wikipedia_bd")
+    palmetto_available = root_dir and os.path.isfile(jar) and os.path.isdir(wikipedia_bd)
+    use_palmetto = palmetto_available and os.environ.get("SCHEMATOPIC_USE_PALMETTO", "1").strip().lower() not in ("0", "false", "no")
+    if use_palmetto:
+        print("Computing topic coherence with Palmetto (%s)..." % (", ".join(measures_to_run)))
+        for measure in measures_to_run:
+            val = run_palmetto_measure(root_dir, topics, measure=measure, topk=topk)
+            key = "topic_coherence_cv" if measure == "C_V" else "topic_coherence_npmi" if measure == "NPMI" else "topic_coherence_uci" if measure == "UCI" else "topic_coherence_umass"
+            out[key] = float(val) if val is not None else None
+        for k, v in out.items():
+            if v is not None:
+                print("  %s: %s" % (k, round(v, 4)))
+        return out
 
     try:
         from gensim.models import CoherenceModel
@@ -201,14 +202,17 @@ def get_topic_coherence_metrics(beta, training_set, vocabulary, topk=10, n_docs_
         print("gensim not installed; skipping coherence metrics.")
         return {k: 0.0 for k in out}
 
-    print("Computing topic coherence with Gensim (default, up to %d documents)." % n_docs_for_coherence)
+    gensim_map = [
+        ("c_v", "topic_coherence_cv", "C_V"),
+        ("c_npmi", "topic_coherence_npmi", "NPMI"),
+        ("c_uci", "topic_coherence_uci", "UCI"),
+        ("u_mass", "topic_coherence_umass", "UMass"),
+    ]
+    print("Computing topic coherence with Gensim (up to %d documents)..." % n_docs_for_coherence)
     texts = _bow_to_texts(training_set, vocabulary, max_docs=n_docs_for_coherence)
-    for coherence_type, key in [
-        ("c_v", "topic_coherence_cv"),
-        ("c_npmi", "topic_coherence_npmi"),
-        ("c_uci", "topic_coherence_uci"),
-        ("u_mass", "topic_coherence_umass"),
-    ]:
+    for coherence_type, key, name in gensim_map:
+        if name not in measures_to_run:
+            continue
         try:
             cm = CoherenceModel(topics=topics, texts=texts, coherence=coherence_type)
             out[key] = float(cm.get_coherence())

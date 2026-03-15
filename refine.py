@@ -279,7 +279,7 @@ def parse_schema_labels(schema_text: str) -> List[str]:
         line = line.strip()
         if not line:
             continue
-        if line.upper() == "SCHEMA:":
+        if line.upper() in ("SCHEMA:", "CATEGORY:"):
             in_schema = True
             continue
         if line.upper() == "CRITERION:":
@@ -305,7 +305,7 @@ def flatten_schema_text(schema_text: str) -> str:
         if not stripped:
             result.append(line)
             continue
-        if stripped.upper() == "SCHEMA:":
+        if stripped.upper() in ("SCHEMA:", "CATEGORY:"):
             in_schema = True
             result.append(line)
             continue
@@ -412,7 +412,7 @@ def build_schema_prompt(topic_words: List[List[str]]) -> List[Dict[str, str]]:
 
     system = (
         "You are an expert in topic modeling. "
-        "Design a schema for the full topic set using only the given topic words."
+        "Your job is to set one global criterion and a list of categories that form the upper layer of the topics—categories must group the topics well (no hierarchy within the list)."
     )
 
     user = f"""
@@ -420,21 +420,20 @@ Topics:
 {topics_text}
 
 Task:
-- Find one semantic criterion for organizing the topics.
-- Propose high-level schema labels for the full topic set.
+1. Look at the topic words above and form a global view of the set.
+2. Set one global criterion for how to partition the topics (e.g. by domain, theme, or semantic type). This criterion applies to the whole set.
+3. List category labels that are the upper layer of the topics: each category should group several topics well. The list is a flat set of high-level labels—not a long enumeration of fine-grained terms. Aim for a small number (e.g. 5–20) that covers the full set.
 
 Rules:
-- Use broad category labels.
-- Do not make topic-specific labels, make schema.
-- Avoid redundant or overlapping labels.
-- Each schema label must be a single line.
-- Flat schema only. No sub-items, no hierarchy.
+- Criterion: one sentence only. It states the single partitioning criterion for the topic set.
+- Categories: they are the upper layer of topics; they must group the topics well. Keep them broad—one word per label; no slashes, no multi-word phrases; one category per line; no sub-categories, no indentation, no "Label: description". Do not list hundreds of fine-grained labels; stop when you have a compact set that groups the topics.
+- No repetition: output each category label at most once; do not repeat the same or similar block of labels. When the list is complete, stop.
 
 Output:
 CRITERION:
 - <one sentence>
 
-SCHEMA:
+CATEGORY:
 - <label 1>
 - <label 2>
 """
@@ -452,11 +451,8 @@ def build_topic_pruning_prompt(
     n_topics = len(topic_words)
 
     system = (
-        "You are an expert in topic modeling. "
-        "Use only the given schema and topic words. "
-        "For each topic, assess interpretability and specificity, try to form a good short topic name, "
-        "and then make one pruning decision. "
-        "Do not invent unsupported meanings."
+        "Topic modeling expert. For each topic: decide keep/delete and give a 1–2 word topic_name. "
+        "Use only the given schema and topic words; do not invent meanings."
     )
 
     user = f"""
@@ -466,39 +462,11 @@ Schema:
 Topics:
 {topics_text}
 
-Task:
-For each topic, follow this order:
-1) assess interpretability: can it be clearly understood and fit the schema?
-2) assess specificity: does it represent a specific semantic theme rather than generic, vague, or mixed words?
-3) try to form a semantically natural topic name in one or two words
-4) then make one decision: "keep" or "delete"
+Task: For each topic (0 to {n_topics - 1}), decide keep or delete and, if keep, a short topic_name (1–2 words). Keep if interpretable and nameable; delete if unclear, generic, mixed, noisy, or stopword-heavy. When in doubt, keep. topic_name must describe that topic's words only; avoid placeholders like "Thing", "Topic".
 
-Output only:
-- topic_id
-- decision: "keep" or "delete"
-- topic_name: one or two words if "keep", otherwise null
+Return: Exactly one JSON array of {n_topics} objects. Each object: "topic_id" (int 0..{n_topics - 1}), "decision" ("keep"|"delete"), "topic_name" (string or null). No text before or after the array. No ellipsis or omission—all {n_topics} objects required (parsed by code).
 
-Decision rule:
-- keep if the topic is interpretable and can be given a reasonable semantic topic_name
-- delete only if it is clearly unclear, generic, mixed, noisy, or cannot be named at all
-- delete topics that are dominated by stopwords
-
-Naming rule:
-- topic_name must describe that topic's words only (topic_id N → name for topic N's words)
-- use one or two words; avoid vague placeholders like "Thing", "Way", "Point", "Line", "Time", "Topic"
-- if a reasonable topic_name is possible, prefer "keep"
-
-Rules:
-- When in doubt, prefer "keep". Delete only when clearly problematic.
-- Exactly {n_topics} topics. Output {n_topics} JSON objects, topic_id 0 to {n_topics - 1}.
-- No extra text.
-
-CRITICAL - NO TRUNCATION:
-- NEVER use ellipsis (...), "etc", or "and so on" in the JSON array.
-- Output must contain exactly {n_topics} complete objects. No omission.
-
-Output compact single-line JSON. No extra whitespace. Example:
-[{{"topic_id":0,"decision":"keep","topic_name":"Motorcycle Safety"}},{{"topic_id":1,"decision":"delete","topic_name":null}}]
+Example shape (one object per topic 0..{n_topics - 1}, no abbreviation): [{{"topic_id":0,"decision":"keep","topic_name":"Name"}},{{"topic_id":1,"decision":"delete","topic_name":null}}]
 """
     return [
         {"role": "system", "content": system},
@@ -557,17 +525,190 @@ CRITICAL - NO TRUNCATION:
 - NEVER use ellipsis (...), "etc", or "and so on" in the JSON array.
 - Output must contain exactly {surviving_topics_n} complete objects. No omission.
 
-Output compact JSON array. One object per line inside []. Example:
-[
-{{"topic_id":0,"topic_name":"example","words":["w1","w2","w3"],"schema":"label"}},
-{{"topic_id":1,"topic_name":"other","words":["a","b","c"],"schema":"label"}}
-]
+Output format: A single JSON array of exactly {surviving_topics_n} objects. Each object has "topic_id", "topic_name", "words" (array of strings, 6-8 per topic), "schema" (string or null). One object per line inside the array. No explanation before or after.
+
+You must write all {surviving_topics_n} objects in full. Do not stop early. Do not write "..." or "truncated" or omit any topic—otherwise the response is invalid.
 """
 
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+
+
+# ---------------------------------------------------------------------------
+# Plain-text fallback (no JSON): used when JSON/truncation fails
+# ---------------------------------------------------------------------------
+
+def build_topic_pruning_prompt_plain_text(
+    topic_words: List[List[str]],
+    schema_text: str,
+) -> List[Dict[str, str]]:
+    """Step 2 fallback: ask for one line per topic (topic_id decision topic_name)."""
+    topics_text = format_topics(topic_words)
+    n_topics = len(topic_words)
+
+    system = (
+        "Topic modeling expert. For each topic: decide keep/delete and give a 1–2 word topic_name. "
+        "Use only the given schema and topic words; do not invent meanings."
+    )
+
+    user = f"""
+Schema:
+{schema_text}
+
+Topics:
+{topics_text}
+
+Task: For each topic (0 to {n_topics - 1}), output exactly one line. Format:
+topic_id decision topic_name
+- topic_id: integer 0 to {n_topics - 1}
+- decision: keep or delete
+- topic_name: 1–2 words if keep; use "-" if delete
+
+Output exactly {n_topics} lines, one per topic. No JSON, no extra text. Example:
+0 keep Sports
+1 delete -
+2 keep Technology
+"""
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def parse_step2_plain_text(text: str, n_topics: int) -> Optional[List[Dict[str, Any]]]:
+    """Parse Step 2 plain-text response into list of {topic_id, decision, topic_name}."""
+    if not text or not isinstance(text, str):
+        return None
+    result = []
+    seen_ids = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            topic_id = int(parts[0])
+        except (TypeError, ValueError):
+            continue
+        if topic_id < 0 or topic_id >= n_topics or topic_id in seen_ids:
+            continue
+        seen_ids.add(topic_id)
+        decision = (parts[1].strip().lower() if len(parts) > 1 else "") or "keep"
+        if decision not in ("keep", "delete"):
+            decision = "keep"
+        topic_name = " ".join(parts[2:]).strip() if len(parts) > 2 else ""
+        if decision == "delete" or not topic_name or topic_name == "-":
+            topic_name = ""
+        result.append({
+            "topic_id": topic_id,
+            "decision": decision,
+            "topic_name": topic_name or None,
+        })
+    # Fill missing topic_ids with keep and empty name
+    for i in range(n_topics):
+        if i not in seen_ids:
+            result.append({"topic_id": i, "decision": "keep", "topic_name": None})
+    result.sort(key=lambda x: x["topic_id"])
+    return result if len(result) == n_topics else None
+
+
+def build_schema_aware_refine_prompt_plain_text(
+    surviving_topics: List[Dict[str, Any]],
+    schema_text: str,
+    surviving_topics_n: int,
+) -> List[Dict[str, str]]:
+    """Step 3 fallback: ask for one block per topic, format 'Topic id: name | word1 word2 | schema'."""
+    topics_text = format_surviving_topics(surviving_topics)
+
+    system = (
+        "You are an expert in topic modeling. "
+        "For each topic: (1) prune words to 6–8, (2) assign one schema label. "
+        "Use topic_name when it matches the words; replace if it contradicts. "
+        "Do not invent meanings."
+    )
+
+    user = f"""
+Schema:
+{schema_text}
+
+Surviving topics:
+{topics_text}
+
+Task: Output exactly {surviving_topics_n} blocks. One block per topic. Format per block:
+Topic <id>: <topic_name> | <word1 word2 ...> | <schema_label or null>
+
+- topic_id: integer 0 to {surviving_topics_n - 1}
+- topic_name: short name
+- words: 6–8 words separated by spaces
+- schema_label: one schema from the list above, or null if deleting this topic
+
+Output only these {surviving_topics_n} lines (one block per line). No JSON, no explanation. Example:
+Topic 0: Sports | football basketball team game league | Sports
+Topic 1: Tech | computer software code data | Technology
+"""
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+def parse_step3_plain_text(text: str, n_topics: int) -> Optional[List[Dict[str, Any]]]:
+    """Parse Step 3 plain-text response into list of {topic_id, topic_name, words, schema}."""
+    if not text or not isinstance(text, str):
+        return None
+    result = []
+    seen_ids = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or not line.lower().startswith("topic "):
+            continue
+        # "Topic 0: name | w1 w2 w3 | schema"
+        rest = line[5:].strip()  # drop "Topic"
+        if ":" not in rest:
+            continue
+        id_part, rest = rest.split(":", 1)
+        try:
+            topic_id = int(id_part.strip())
+        except (TypeError, ValueError):
+            continue
+        if topic_id < 0 or topic_id >= n_topics or topic_id in seen_ids:
+            continue
+        rest = rest.strip()
+        if "|" not in rest:
+            topic_name = rest
+            words_list = []
+            schema = MISC_SCHEMA
+        else:
+            parts = [p.strip() for p in rest.split("|")]
+            topic_name = parts[0].strip() if parts else ""
+            words_str = parts[1].strip() if len(parts) > 1 else ""
+            words_list = [w.strip() for w in words_str.split() if w.strip()][:20]
+            schema = (parts[2].strip() if len(parts) > 2 else "").strip() or MISC_SCHEMA
+        if not topic_name:
+            topic_name = MISC_SCHEMA
+        if schema.lower() in ("null", "none", ""):
+            schema = MISC_SCHEMA
+        seen_ids.add(topic_id)
+        result.append({
+            "topic_id": topic_id,
+            "topic_name": topic_name,
+            "words": words_list if words_list else [],
+            "schema": schema,
+        })
+    for i in range(n_topics):
+        if i not in seen_ids:
+            result.append({
+                "topic_id": i,
+                "topic_name": MISC_SCHEMA,
+                "words": [],
+                "schema": MISC_SCHEMA,
+            })
+    result.sort(key=lambda x: x["topic_id"])
+    return result if len(result) == n_topics else None
 
 
 def call_llm(
@@ -595,7 +736,7 @@ def call_llm(
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            max_tokens=clamped_max_new_tokens,
+            max_completion_tokens=clamped_max_new_tokens,
             temperature=0,
         )
         if llm_call_count is not None:
@@ -895,8 +1036,8 @@ def build_schema_topic_words(schema_topics: Any) -> List[Dict[str, Any]]:
 def run_llm_four_step_schema_pipeline(
     topic_words: List[List[str]],
     model_name: str = "meta-llama/Meta-Llama-3-8B-Instruct",
-    max_new_tokens_step1: int = 1200,
-    max_new_tokens_step2: int = 1500,
+    max_new_tokens_step1: int = 4096,
+    max_new_tokens_step2: int = 4096,
     max_new_tokens_step3: int = 4096,
     json_retry_attempts: int = 0,
     out_dir: str = "results",
@@ -968,14 +1109,37 @@ def run_llm_four_step_schema_pipeline(
         llm_call_count=llm_call_count,
     )
     step2_path = os.path.join(out_dir, "step2.txt")
+    try:
+        check_and_raise_if_truncated(
+            step2_text or "",
+            step_name="Step 2",
+            expected_count=len(topic_words),
+            parsed_json=step2_json,
+        )
+    except TruncationError:
+        print("[Step 2] Truncation/invalid JSON detected. Retrying with plain-text format...")
+        step2_plain_messages = build_topic_pruning_prompt_plain_text(topic_words, schema_text=step1_text)
+        step2_text = call_llm(
+            model=model,
+            tokenizer=tokenizer,
+            client=client,
+            model_name=model_name if use_openai else None,
+            messages=step2_plain_messages,
+            max_new_tokens=max_new_tokens_step2,
+            device=device,
+            llm_call_count=llm_call_count,
+        )
+        step2_json = parse_step2_plain_text(step2_text or "", len(topic_words))
+        if step2_json is None:
+            raise TruncationError(
+                step_name="Step 2",
+                message="plain-text fallback parse failed",
+                text_preview=(step2_text or "")[:500],
+            )
+        print("[Step 2] Plain-text fallback succeeded.")
+
     with open(step2_path, "w", encoding="utf-8") as f:
         f.write(step2_text or "")
-    check_and_raise_if_truncated(
-        step2_text or "",
-        step_name="Step 2",
-        expected_count=len(topic_words),
-        parsed_json=step2_json,
-    )
 
     print("\n===== STEP 2: SCORE + PRUNE =====\n")
     print(step2_text)
@@ -988,6 +1152,11 @@ def run_llm_four_step_schema_pipeline(
     else:
         print("[Step 2] Deleted 0 topics: []")
     print(f"[Step 2] Remaining topics: {len(surviving_ids_step2)}")
+
+    # Reindex surviving_topics to 0, 1, 2, ... so step3 prompt shows consecutive "Topic 0, 1, 2, ..."
+    # and LLM output has no gaps. Avoids confusion where "second block" gets assigned to topic_id 2.
+    for new_id, t in enumerate(surviving_topics):
+        t["topic_id"] = new_id
 
     step3_messages = build_schema_aware_refine_prompt(
         surviving_topics=surviving_topics,
@@ -1007,14 +1176,41 @@ def run_llm_four_step_schema_pipeline(
         llm_call_count=llm_call_count,
     )
     step3_path = os.path.join(out_dir, "step3.txt")
+    try:
+        check_and_raise_if_truncated(
+            step3_text or "",
+            step_name="Step 3",
+            expected_count=len(surviving_topics),
+            parsed_json=step3_json,
+        )
+    except TruncationError:
+        print("[Step 3] Truncation/invalid JSON detected. Retrying with plain-text format...")
+        step3_plain_messages = build_schema_aware_refine_prompt_plain_text(
+            surviving_topics=surviving_topics,
+            schema_text=step1_text,
+            surviving_topics_n=len(surviving_topics),
+        )
+        step3_text = call_llm(
+            model=model,
+            tokenizer=tokenizer,
+            client=client,
+            model_name=model_name if use_openai else None,
+            messages=step3_plain_messages,
+            max_new_tokens=max_new_tokens_step3,
+            device=device,
+            llm_call_count=llm_call_count,
+        )
+        step3_json = parse_step3_plain_text(step3_text or "", len(surviving_topics))
+        if step3_json is None:
+            raise TruncationError(
+                step_name="Step 3",
+                message="plain-text fallback parse failed",
+                text_preview=(step3_text or "")[:500],
+            )
+        print("[Step 3] Plain-text fallback succeeded.")
+
     with open(step3_path, "w", encoding="utf-8") as f:
         f.write(step3_text or "")
-    check_and_raise_if_truncated(
-        step3_text or "",
-        step_name="Step 3",
-        expected_count=len(surviving_topics),
-        parsed_json=step3_json,
-    )
     schema_topics = postprocess_final_topics(step3_json or {})
     refined_topics = flatten_schema_topics(schema_topics)
     if len(refined_topics) < len(surviving_topics):
@@ -1102,6 +1298,7 @@ def run_llm_four_step_schema_pipeline(
             {
                 "wall_clock_seconds": round(wall_clock_seconds, 2),
                 "llm_call_count": llm_call_count[0],
+                "surviving_original_ids": surviving_ids_step2,
             },
             f,
             indent=2,

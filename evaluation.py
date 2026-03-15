@@ -1,8 +1,14 @@
 """
 Topic coherence (C_V, NPMI, UCI, UMass), topic diversity (TD), clustering (Purity, NMI).
 """
+import os
 import numpy as np
 from utils import get_topic_coherence_metrics, get_topic_diversity, get_topics
+
+
+def _cv_td_only():
+    """환경변수 SCHEMATOPIC_CV_TD_ONLY=1 이면 C_V·TD만 계산 (빠른 평가)."""
+    return os.environ.get("SCHEMATOPIC_CV_TD_ONLY", "").strip().lower() in ("1", "true", "yes")
 
 
 def compute_purity_nmi(theta, labels, num_topics):
@@ -57,12 +63,36 @@ def run_evaluation(beta, theta_test, train_bow, test_labels,
                    vocab, num_topics, topk_words=10, n_docs_coherence=2000, root_dir=None):
     """
     Coherence (C_V, NPMI, UCI, UMass), TD, Purity, NMI, PN 계산.
-    root_dir: Palmetto jar + wikipedia_bd 경로 (있으면 Palmetto로 4가지 coherence)
+    root_dir: Palmetto jar + wikipedia_bd 경로 (있으면 Palmetto로 coherence).
+    C_V·TD만 쓰려면 환경변수 SCHEMATOPIC_CV_TD_ONLY=1 설정.
     """
     if hasattr(beta, "detach"):
         beta_np = beta.detach().cpu().numpy()
     else:
         beta_np = np.asarray(beta)
+
+    cv_td_only = _cv_td_only()
+    if cv_td_only:
+        print("\n[Evaluation] C_V + TD only (SCHEMATOPIC_CV_TD_ONLY=1).")
+        coherence_metrics = get_topic_coherence_metrics(
+            beta_np, train_bow, vocab,
+            topk=topk_words, n_docs_for_coherence=n_docs_coherence,
+            root_dir=root_dir,
+            measures=["C_V"],
+        )
+        print("[Evaluation] Topic coherence (C_V) finished.")
+        td = get_topic_diversity(beta_np, topk=25)
+        print("[Evaluation] Topic diversity finished.\n")
+        result = {
+            "eval_cv_td_only": True,
+            "topic_diversity": td,
+            "purity": 0.0,
+            "nmi": 0.0,
+            "PN": 0.0,
+        }
+        for k, v in coherence_metrics.items():
+            result[k] = v if v is not None else 0.0
+        return result
 
     print("\n[Evaluation] Starting topic coherence (C_V, NPMI, UCI, UMass) / diversity / clustering...")
     coherence_metrics = get_topic_coherence_metrics(
@@ -85,6 +115,7 @@ def run_evaluation(beta, theta_test, train_bow, test_labels,
     print("[Evaluation] All metrics finished.\n")
 
     result = {
+        "eval_cv_td_only": False,
         "topic_diversity": td,
         "purity": purity,
         "nmi": nmi,

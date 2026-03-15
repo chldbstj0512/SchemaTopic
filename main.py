@@ -6,6 +6,26 @@ import tempfile
 from argparse import Namespace
 from pathlib import Path
 
+# .env 로드 (OPENAI_API_KEY 등): 프로젝트 루트의 .env를 읽어 os.environ에 반영
+def _load_dotenv():
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+
+
+_load_dotenv()
+
 from dataset import infer_dataset_name, list_available_datasets
 from llm_validation import TruncationError
 from topic_models import list_supported_topic_models
@@ -183,6 +203,7 @@ def ensure_results_root():
 
 
 def resolve_dataset_settings(args):
+    # 데이터셋: 프로젝트 최상위의 datasets/<이름>. data_dir는 상대경로로 전달되고 train에서 ROOT와 결합됨.
     if getattr(args, "data_dir", None):
         data_dir = args.data_dir
     else:

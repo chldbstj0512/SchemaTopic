@@ -57,6 +57,21 @@ def validate_llm_response_no_truncation(
     return True, None
 
 
+def raise_if_ellipsis_in_response(text: str, step_name: str) -> None:
+    """
+    응답에 ... ] / ... } 가 있으면 즉시 TruncationError.
+    앞에 있는 토픽으로 진행하지 않고 실패 처리한다.
+    """
+    if not text or not isinstance(text, str):
+        return
+    if _ELLIPSIS_PATTERN.search(text):
+        raise TruncationError(
+            step_name=step_name,
+            message="ellipsis (...) found in response; treat as failure, do not use partial output",
+            text_preview=text[:800] if text else "",
+        )
+
+
 def check_and_raise_if_truncated(
     text: str,
     step_name: str,
@@ -65,7 +80,11 @@ def check_and_raise_if_truncated(
 ) -> None:
     """
     생략 감지 시 TruncationError 발생.
+    ... 발견 시 앞의 부분 결과로 진행하지 않고 실패 처리.
     """
+    # 로그에 단계 명시 (실패 시 터진 단계를 로그로 확실히 확인 가능)
+    print(f"[Validate truncation] {step_name} ...")
+    raise_if_ellipsis_in_response(text or "", step_name)
     is_valid, err = validate_llm_response_no_truncation(
         text, step_name, expected_count, parsed_json
     )
@@ -97,7 +116,7 @@ def validate_schema_step1_flat(schema_text: str) -> Tuple[bool, Optional[str]]:
     in_schema = False
     for line in schema_text.splitlines():
         stripped = line.strip()
-        if stripped.upper() == "SCHEMA:":
+        if stripped.upper() in ("SCHEMA:", "CATEGORY:"):
             in_schema = True
             continue
         if stripped.upper() == "CRITERION:":

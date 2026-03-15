@@ -6,3 +6,5 @@ results/
 experiments/
 .env    
 troubleshooting/
+.scripts/
+PIPELINE_REFINE_LOGIC.md
