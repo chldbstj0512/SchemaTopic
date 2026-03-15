@@ -107,6 +107,13 @@ def _is_openai_model(model_name: str) -> bool:
     return any(name.startswith(p) for p in OPENAI_MODEL_PREFIXES)
 
 
+def _use_plain_text_first_for_schema(model_name: str) -> bool:
+    """Llama 계열 등 JSON을 자주 잘라서, Step2/Step3를 처음부터 plain-text로 요청할지."""
+    if not model_name or not isinstance(model_name, str):
+        return False
+    return "llama" in model_name.strip().lower()
+
+
 def _strip_trailing_and_clean_json(text: str) -> str:
     """Strip LLM trailing text and fix common invalid JSON patterns."""
     text = text.strip()
@@ -1048,6 +1055,9 @@ def run_llm_four_step_schema_pipeline(
     t0 = time.perf_counter()
     llm_call_count = [0]
     use_openai = _is_openai_model(model_name)
+    use_plain_first = _use_plain_text_first_for_schema(model_name)
+    if use_plain_first:
+        print("[Schema] Using plain-text format first for Step 2/3 (Llama).")
 
     if use_openai:
         if OpenAI is None:
@@ -1095,36 +1105,15 @@ def run_llm_four_step_schema_pipeline(
     with open(step1_path, "w", encoding="utf-8") as f:
         f.write(step1_text)
 
-    step2_messages = build_topic_pruning_prompt(topic_words, schema_text=step1_text)
-    step2_text, step2_json = call_llm_until_valid_json(
-        model=model,
-        tokenizer=tokenizer,
-        client=client,
-        model_name=model_name if use_openai else None,
-        messages=step2_messages,
-        max_new_tokens=max_new_tokens_step2,
-        step_name="Step 2",
-        json_retry_attempts=json_retry_attempts,
-        device=device,
-        llm_call_count=llm_call_count,
-    )
     step2_path = os.path.join(out_dir, "step2.txt")
-    try:
-        check_and_raise_if_truncated(
-            step2_text or "",
-            step_name="Step 2",
-            expected_count=len(topic_words),
-            parsed_json=step2_json,
-        )
-    except TruncationError:
-        print("[Step 2] Truncation/invalid JSON detected. Retrying with plain-text format...")
-        step2_plain_messages = build_topic_pruning_prompt_plain_text(topic_words, schema_text=step1_text)
+    if use_plain_first:
+        step2_messages = build_topic_pruning_prompt_plain_text(topic_words, schema_text=step1_text)
         step2_text = call_llm(
             model=model,
             tokenizer=tokenizer,
             client=client,
             model_name=model_name if use_openai else None,
-            messages=step2_plain_messages,
+            messages=step2_messages,
             max_new_tokens=max_new_tokens_step2,
             device=device,
             llm_call_count=llm_call_count,
@@ -1133,10 +1122,51 @@ def run_llm_four_step_schema_pipeline(
         if step2_json is None:
             raise TruncationError(
                 step_name="Step 2",
-                message="plain-text fallback parse failed",
+                message="plain-text parse failed",
                 text_preview=(step2_text or "")[:500],
             )
-        print("[Step 2] Plain-text fallback succeeded.")
+    else:
+        step2_messages = build_topic_pruning_prompt(topic_words, schema_text=step1_text)
+        step2_text, step2_json = call_llm_until_valid_json(
+            model=model,
+            tokenizer=tokenizer,
+            client=client,
+            model_name=model_name if use_openai else None,
+            messages=step2_messages,
+            max_new_tokens=max_new_tokens_step2,
+            step_name="Step 2",
+            json_retry_attempts=json_retry_attempts,
+            device=device,
+            llm_call_count=llm_call_count,
+        )
+        try:
+            check_and_raise_if_truncated(
+                step2_text or "",
+                step_name="Step 2",
+                expected_count=len(topic_words),
+                parsed_json=step2_json,
+            )
+        except TruncationError:
+            print("[Step 2] Truncation/invalid JSON detected. Retrying with plain-text format...")
+            step2_plain_messages = build_topic_pruning_prompt_plain_text(topic_words, schema_text=step1_text)
+            step2_text = call_llm(
+                model=model,
+                tokenizer=tokenizer,
+                client=client,
+                model_name=model_name if use_openai else None,
+                messages=step2_plain_messages,
+                max_new_tokens=max_new_tokens_step2,
+                device=device,
+                llm_call_count=llm_call_count,
+            )
+            step2_json = parse_step2_plain_text(step2_text or "", len(topic_words))
+            if step2_json is None:
+                raise TruncationError(
+                    step_name="Step 2",
+                    message="plain-text fallback parse failed",
+                    text_preview=(step2_text or "")[:500],
+                )
+            print("[Step 2] Plain-text fallback succeeded.")
 
     with open(step2_path, "w", encoding="utf-8") as f:
         f.write(step2_text or "")
@@ -1158,34 +1188,9 @@ def run_llm_four_step_schema_pipeline(
     for new_id, t in enumerate(surviving_topics):
         t["topic_id"] = new_id
 
-    step3_messages = build_schema_aware_refine_prompt(
-        surviving_topics=surviving_topics,
-        schema_text=step1_text,
-        surviving_topics_n=len(surviving_topics),
-    )
-    step3_text, step3_json = call_llm_until_valid_json(
-        model=model,
-        tokenizer=tokenizer,
-        client=client,
-        model_name=model_name if use_openai else None,
-        messages=step3_messages,
-        max_new_tokens=max_new_tokens_step3,
-        step_name="Step 3",
-        json_retry_attempts=json_retry_attempts,
-        device=device,
-        llm_call_count=llm_call_count,
-    )
     step3_path = os.path.join(out_dir, "step3.txt")
-    try:
-        check_and_raise_if_truncated(
-            step3_text or "",
-            step_name="Step 3",
-            expected_count=len(surviving_topics),
-            parsed_json=step3_json,
-        )
-    except TruncationError:
-        print("[Step 3] Truncation/invalid JSON detected. Retrying with plain-text format...")
-        step3_plain_messages = build_schema_aware_refine_prompt_plain_text(
+    if use_plain_first:
+        step3_messages = build_schema_aware_refine_prompt_plain_text(
             surviving_topics=surviving_topics,
             schema_text=step1_text,
             surviving_topics_n=len(surviving_topics),
@@ -1195,7 +1200,7 @@ def run_llm_four_step_schema_pipeline(
             tokenizer=tokenizer,
             client=client,
             model_name=model_name if use_openai else None,
-            messages=step3_plain_messages,
+            messages=step3_messages,
             max_new_tokens=max_new_tokens_step3,
             device=device,
             llm_call_count=llm_call_count,
@@ -1204,10 +1209,59 @@ def run_llm_four_step_schema_pipeline(
         if step3_json is None:
             raise TruncationError(
                 step_name="Step 3",
-                message="plain-text fallback parse failed",
+                message="plain-text parse failed",
                 text_preview=(step3_text or "")[:500],
             )
-        print("[Step 3] Plain-text fallback succeeded.")
+    else:
+        step3_messages = build_schema_aware_refine_prompt(
+            surviving_topics=surviving_topics,
+            schema_text=step1_text,
+            surviving_topics_n=len(surviving_topics),
+        )
+        step3_text, step3_json = call_llm_until_valid_json(
+            model=model,
+            tokenizer=tokenizer,
+            client=client,
+            model_name=model_name if use_openai else None,
+            messages=step3_messages,
+            max_new_tokens=max_new_tokens_step3,
+            step_name="Step 3",
+            json_retry_attempts=json_retry_attempts,
+            device=device,
+            llm_call_count=llm_call_count,
+        )
+        try:
+            check_and_raise_if_truncated(
+                step3_text or "",
+                step_name="Step 3",
+                expected_count=len(surviving_topics),
+                parsed_json=step3_json,
+            )
+        except TruncationError:
+            print("[Step 3] Truncation/invalid JSON detected. Retrying with plain-text format...")
+            step3_plain_messages = build_schema_aware_refine_prompt_plain_text(
+                surviving_topics=surviving_topics,
+                schema_text=step1_text,
+                surviving_topics_n=len(surviving_topics),
+            )
+            step3_text = call_llm(
+                model=model,
+                tokenizer=tokenizer,
+                client=client,
+                model_name=model_name if use_openai else None,
+                messages=step3_plain_messages,
+                max_new_tokens=max_new_tokens_step3,
+                device=device,
+                llm_call_count=llm_call_count,
+            )
+            step3_json = parse_step3_plain_text(step3_text or "", len(surviving_topics))
+            if step3_json is None:
+                raise TruncationError(
+                    step_name="Step 3",
+                    message="plain-text fallback parse failed",
+                    text_preview=(step3_text or "")[:500],
+                )
+            print("[Step 3] Plain-text fallback succeeded.")
 
     with open(step3_path, "w", encoding="utf-8") as f:
         f.write(step3_text or "")
