@@ -11,8 +11,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from data import get_batch
-from dataset import load_topic_dataset
+from dataset import get_batch, load_topic_dataset
 from evaluation import get_top_words_per_topic, run_evaluation
 from topic_models import create_topic_model
 from utils import (
@@ -621,6 +620,26 @@ def run_eval_from_checkpoint(checkpoint_path, data_dir=None, root_dir=None):
     )
     metrics = eval_outputs["metrics"]
     top_words = eval_outputs["top_words"]
+
+    # Optional: TraCo hierarchy metrics when schema_topics.json exists
+    anchor_topics = training_args.get("anchor_topics_json")
+    if anchor_topics:
+        schema_path = root / anchor_topics
+        if schema_path.exists():
+            try:
+                from hierarchical_metrics import compute_hierarchical_metrics
+                hier = compute_hierarchical_metrics(
+                    str(schema_path),
+                    train_bow,
+                    test_bow,
+                    vocab,
+                    num_top_words=args.topk_words,
+                )
+                metrics["hierarchy"] = hier
+                print("\n--- Hierarchy metrics (TraCo) ---")
+                print(json.dumps(hier, indent=2))
+            except Exception as e:
+                print("[Warn] Hierarchy metrics failed:", e)
 
     print("\n--- Evaluation results ---")
     print(json.dumps(metrics, indent=2))

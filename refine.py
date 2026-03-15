@@ -9,6 +9,14 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
 from llm_validation import check_and_raise_if_truncated, check_schema_step1_flat, TruncationError
+
+# OpenAI API models (gpt-4o, gpt-5.2, opus 등) - API 호출 시 사용
+OPENAI_MODEL_PREFIXES = ("gpt-", "opus", "o1-", "o3-")
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 from tool import filter_stopwords
 
 MAX_LLM_NEW_TOKENS = 4096
@@ -89,6 +97,14 @@ def extract_assistant_new_text(tokenizer, output_ids, model_inputs):
     input_len = model_inputs["input_ids"].shape[1]
     new_tokens = output_ids[0, input_len:]
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+
+def _is_openai_model(model_name: str) -> bool:
+    """OpenAI API 모델인지 (gpt-4o, gpt-5.2, opus 등)."""
+    if not model_name or not isinstance(model_name, str):
+        return False
+    name = model_name.strip().lower()
+    return any(name.startswith(p) for p in OPENAI_MODEL_PREFIXES)
 
 
 def _strip_trailing_and_clean_json(text: str) -> str:
@@ -555,13 +571,16 @@ Output compact JSON array. One object per line inside []. Example:
 
 
 def call_llm(
-    model,
-    tokenizer,
-    messages: List[Dict[str, str]],
-    max_new_tokens: int,
+    model=None,
+    tokenizer=None,
+    client=None,
+    model_name: Optional[str] = None,
+    messages: Optional[List[Dict[str, str]]] = None,
+    max_new_tokens: int = 4096,
     device: str = "cuda",
     llm_call_count: Optional[List[int]] = None,
 ) -> str:
+    """LLM 호출. OpenAI API (client, model_name) 또는 HuggingFace (model, tokenizer) 지원."""
     requested_max_new_tokens = int(max_new_tokens)
     clamped_max_new_tokens = min(requested_max_new_tokens, MAX_LLM_NEW_TOKENS)
     if clamped_max_new_tokens != requested_max_new_tokens:
@@ -572,6 +591,19 @@ def call_llm(
             )
         )
 
+    if client is not None and model_name:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            max_tokens=clamped_max_new_tokens,
+            temperature=0,
+        )
+        if llm_call_count is not None:
+            llm_call_count[0] += 1
+        content = response.choices[0].message.content if response.choices else ""
+        return (content or "").strip()
+
+    # HuggingFace path
     model_inputs = tokenizer.apply_chat_template(
         messages,
         add_generation_prompt=True,
@@ -604,10 +636,12 @@ def call_llm(
 
 
 def call_llm_until_valid_json(
-    model,
-    tokenizer,
-    messages: List[Dict[str, str]],
-    max_new_tokens: int,
+    model=None,
+    tokenizer=None,
+    client=None,
+    model_name: Optional[str] = None,
+    messages: Optional[List[Dict[str, str]]] = None,
+    max_new_tokens: int = 4096,
     *,
     step_name: str,
     json_retry_attempts: int = 0,
@@ -634,6 +668,8 @@ def call_llm_until_valid_json(
         text = call_llm(
             model=model,
             tokenizer=tokenizer,
+            client=client,
+            model_name=model_name,
             messages=messages,
             max_new_tokens=attempt_max_new_tokens,
             device=device,
@@ -870,25 +906,35 @@ def run_llm_four_step_schema_pipeline(
 
     t0 = time.perf_counter()
     llm_call_count = [0]
+    use_openai = _is_openai_model(model_name)
 
-    print("Loading LLM:", model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    dtype = torch.float16 if device.startswith("cuda") else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-        torch_dtype=dtype,
-    ).to(device)
-    model.eval()
-    print("LLM loaded.")
+    if use_openai:
+        if OpenAI is None:
+            raise ImportError("OpenAI API 사용 시 'pip install openai' 필요")
+        print("Using OpenAI API model:", model_name)
+        client = OpenAI()
+        model, tokenizer = None, None
+    else:
+        print("Loading LLM (HuggingFace):", model_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        dtype = torch.float16 if device.startswith("cuda") else torch.float32
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            torch_dtype=dtype,
+        ).to(device)
+        model.eval()
+        client = None
+        print("LLM loaded.")
 
     step1_messages = build_schema_prompt(topic_words)
     step1_text = call_llm(
         model=model,
         tokenizer=tokenizer,
+        client=client,
+        model_name=model_name if use_openai else None,
         messages=step1_messages,
         max_new_tokens=max_new_tokens_step1,
         device=device,
@@ -912,6 +958,8 @@ def run_llm_four_step_schema_pipeline(
     step2_text, step2_json = call_llm_until_valid_json(
         model=model,
         tokenizer=tokenizer,
+        client=client,
+        model_name=model_name if use_openai else None,
         messages=step2_messages,
         max_new_tokens=max_new_tokens_step2,
         step_name="Step 2",
@@ -949,6 +997,8 @@ def run_llm_four_step_schema_pipeline(
     step3_text, step3_json = call_llm_until_valid_json(
         model=model,
         tokenizer=tokenizer,
+        client=client,
+        model_name=model_name if use_openai else None,
         messages=step3_messages,
         max_new_tokens=max_new_tokens_step3,
         step_name="Step 3",

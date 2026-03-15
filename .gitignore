@@ -3,4 +3,6 @@ wikipedia_bd
 *.jar
 *.histogram
 results/
+experiments/
+.env    
 troubleshooting/

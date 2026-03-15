@@ -1,10 +1,23 @@
 """
-dataset: preprocessed topic-model dataset loader utilities.
+dataset: preprocessed topic-model dataset loader utilities and batch helpers (e.g. get_batch).
 """
 import pickle
 import numpy as np
 import torch
 from pathlib import Path
+
+
+def get_batch(data_tensor, indices, device):
+    """
+    data_tensor: (N, V) BOW
+    indices: 1-D tensor of doc indices
+    returns: (batch_size, V) on device
+    """
+    if isinstance(indices, torch.Tensor):
+        idx = indices
+    else:
+        idx = torch.tensor(indices, dtype=torch.long)
+    return data_tensor[idx].to(device)
 
 
 def load_vocab(voc_path):

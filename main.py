@@ -11,6 +11,7 @@ from llm_validation import TruncationError
 from topic_models import list_supported_topic_models
 from refine import run_refine_from_file
 from refine_k import run_refine_from_file as run_refine_from_file_keep
+from refine_wo import run_refine_from_file_wo
 from train import run_train, run_eval_from_checkpoint
 
 
@@ -68,7 +69,12 @@ def add_schema_arguments(parser):
         default=False,
         help="use k-keep mode: retain all topics (no delete) in LLM refinement",
     )
-    parser.add_argument("--model_name", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct")
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="meta-llama/Meta-Llama-3-8B-Instruct",
+        help="LLM for schema: HuggingFace (e.g. meta-llama/...) or OpenAI (gpt-4o, gpt-5.2, opus)",
+    )
     parser.add_argument("--max_new_tokens_step1", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step2", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step3", type=int, default=4096)
@@ -81,6 +87,21 @@ def add_schema_arguments(parser):
     parser.add_argument("--out_dir", type=str, default=None)
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument(
+        "--skip_step1",
+        action="store_true",
+        help="ablation: skip schema induction (use default schema)",
+    )
+    parser.add_argument(
+        "--skip_step2",
+        action="store_true",
+        help="ablation: skip score+prune (keep all topics)",
+    )
+    parser.add_argument(
+        "--skip_step3",
+        action="store_true",
+        help="ablation: skip schema-aware refine (build schema from step2 only)",
+    )
     return parser
 
 
@@ -121,7 +142,12 @@ def add_pipeline_arguments(parser):
     parser.add_argument("--run_name", type=str, default=None)
     parser.add_argument("--lambda_anchor", type=float, default=1.0)
 
-    parser.add_argument("--model_name", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct")
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="meta-llama/Meta-Llama-3-8B-Instruct",
+        help="LLM for schema: HuggingFace (e.g. meta-llama/...) or OpenAI (gpt-4o, gpt-5.2, opus)",
+    )
     parser.add_argument("--max_new_tokens_step1", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step2", type=int, default=4096)
     parser.add_argument("--max_new_tokens_step3", type=int, default=4096)
@@ -142,8 +168,11 @@ def add_pipeline_arguments(parser):
         "--topic_words_file",
         type=str,
         default=None,
-        help="skip vanilla training; use this top_words file for schema (e.g. results/pipeline_X/vanilla/top_words.txt)",
+        help="skip vanilla training; use this top_words file for schema (e.g. results_final/pipeline_X/auto/vanilla/top_words.txt)",
     )
+    parser.add_argument("--skip_step1", action="store_true", help="ablation: skip schema step")
+    parser.add_argument("--skip_step2", action="store_true", help="ablation: skip prune step")
+    parser.add_argument("--skip_step3", action="store_true", help="ablation: skip refine step")
     return parser
 
 
@@ -211,19 +240,42 @@ def finalize_refine_result(result, final_dir):
 
 
 def run_schema(args, output_parent_dir=None, folder_name=None):
-    run_refine = run_refine_from_file_keep if getattr(args, "keep", False) else run_refine_from_file
-    if args.out_dir is not None:
-        return run_refine(
+    use_wo = any(
+        getattr(args, flag, False)
+        for flag in ("skip_step1", "skip_step2", "skip_step3")
+    )
+    if use_wo:
+        run_refine = run_refine_from_file_wo
+        refine_kw = dict(
+            topic_words_file=args.topic_words_file,
+            model_name=args.model_name,
+            skip_step1=getattr(args, "skip_step1", False),
+            skip_step2=getattr(args, "skip_step2", False),
+            skip_step3=getattr(args, "skip_step3", False),
+            max_new_tokens_step1=args.max_new_tokens_step1,
+            max_new_tokens_step2=args.max_new_tokens_step2,
+            max_new_tokens_step3=args.max_new_tokens_step3,
+            json_retry_attempts=args.json_retry_attempts,
+            out_dir=args.out_dir or "",
+            run_name=args.run_name,
+            device=args.device,
+        )
+    else:
+        run_refine = run_refine_from_file_keep if getattr(args, "keep", False) else run_refine_from_file
+        refine_kw = dict(
             topic_words_file=args.topic_words_file,
             model_name=args.model_name,
             max_new_tokens_step1=args.max_new_tokens_step1,
             max_new_tokens_step2=args.max_new_tokens_step2,
             max_new_tokens_step3=args.max_new_tokens_step3,
             json_retry_attempts=args.json_retry_attempts,
-            out_dir=args.out_dir,
+            out_dir=args.out_dir or "",
             run_name=args.run_name,
             device=args.device,
         )
+
+    if args.out_dir is not None:
+        return run_refine(**{**refine_kw, "out_dir": args.out_dir})
 
     if output_parent_dir is None:
         output_parent_dir = ensure_results_root()
@@ -237,17 +289,7 @@ def run_schema(args, output_parent_dir=None, folder_name=None):
             dir=str(output_parent_dir),
         )
     )
-    result = run_refine(
-        topic_words_file=args.topic_words_file,
-        model_name=args.model_name,
-        max_new_tokens_step1=args.max_new_tokens_step1,
-        max_new_tokens_step2=args.max_new_tokens_step2,
-        max_new_tokens_step3=args.max_new_tokens_step3,
-        json_retry_attempts=args.json_retry_attempts,
-        out_dir=str(temp_dir),
-        run_name=args.run_name,
-        device=args.device,
-    )
+    result = run_refine(**{**refine_kw, "out_dir": str(temp_dir)})
 
     final_topic_count = len(result.get("final_topic_ids", []))
     if folder_name is None:
@@ -372,7 +414,7 @@ def build_parser():
         "--checkpoint",
         type=str,
         required=True,
-        help="Path to model.pt or directory containing model.pt (e.g., results/pipeline_X/anchor)",
+        help="Path to model.pt or directory containing model.pt (e.g., results_final/pipeline_X/auto/anchor)",
     )
     eval_parser.add_argument(
         "--data_dir",
@@ -380,6 +422,14 @@ def build_parser():
         default=None,
         help="Dataset path (default: from checkpoint training_args)",
     )
+
+    hierarchy_parser = subparsers.add_parser(
+        "hierarchy",
+        help="Compute TraCo hierarchy metrics (CLNPMI, PC_TD, Sibling_TD, PnonC_TD) from schema_topics.json.",
+    )
+    hierarchy_parser.add_argument("--schema", type=str, required=True, help="path to schema_topics.json")
+    hierarchy_parser.add_argument("--data_dir", type=str, required=True, help="e.g. datasets/20News")
+    hierarchy_parser.add_argument("--num_top_words", type=int, default=15)
 
     return parser
 
@@ -403,7 +453,7 @@ def run_pipeline(args):
         if not topic_words_path.exists():
             raise FileNotFoundError(
                 f"topic_words_file not found: {topic_words_file}\n"
-                f"Expected e.g. results/pipeline_{{dataset}}_{{model}}_50_seed{{seed}}/vanilla/top_words.txt"
+                f"Expected e.g. results_final/pipeline_{{dataset}}_{{model}}_50_seed{{seed}}/auto/vanilla/top_words.txt"
             )
         print("\n=== Stage 1/3: Skip vanilla (use existing top words) ===")
         print(f"  Using: {topic_words_path}")
@@ -428,6 +478,9 @@ def run_pipeline(args):
         run_name=args.run_name,
         device=args.device,
         keep=getattr(args, "keep", False),
+        skip_step1=getattr(args, "skip_step1", False),
+        skip_step2=getattr(args, "skip_step2", False),
+        skip_step3=getattr(args, "skip_step3", False),
     )
     try:
         schema_result = run_schema(
@@ -515,6 +568,23 @@ def main():
             checkpoint_path=args.checkpoint,
             data_dir=args.data_dir,
         )
+        return
+
+    if args.command == "hierarchy":
+        from hierarchical_metrics import compute_hierarchical_metrics
+        from dataset import load_topic_dataset
+
+        data = load_topic_dataset(args.data_dir)
+        metrics = compute_hierarchical_metrics(
+            args.schema,
+            data["train_bow"],
+            data["test_bow"],
+            data["vocab"],
+            num_top_words=args.num_top_words,
+        )
+        print("Hierarchy metrics (TraCo-style):")
+        for k, v in metrics.items():
+            print("  {}: {:.5f}".format(k, v))
         return
 
     parser.print_help()

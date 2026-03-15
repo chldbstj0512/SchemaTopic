@@ -10,6 +10,7 @@ import torch
 
 from llm_validation import check_and_raise_if_truncated, check_schema_step1_flat, TruncationError
 from tool import filter_stopwords
+from refine import _is_openai_model, OpenAI
 
 MAX_LLM_NEW_TOKENS = 4096
 MISC_SCHEMA = "Misc"
@@ -279,6 +280,28 @@ def parse_schema_labels(schema_text: str) -> List[str]:
                 labels.append(value)
 
     return labels
+
+
+def truncate_schema_step1_repetition(schema_text: str, max_consecutive_dupes: int = 3) -> str:
+    """LLM 반복 루프 감지: 동일 라인이 max_consecutive_dupes회 이상 연속이면 그 이전까지만 사용."""
+    lines = schema_text.splitlines()
+    if len(lines) < max_consecutive_dupes:
+        return schema_text
+    result = []
+    dup_count = 0
+    last_line = None
+    for line in lines:
+        stripped = line.strip()
+        if stripped and last_line is not None and stripped == last_line:
+            dup_count += 1
+            if dup_count >= max_consecutive_dupes:
+                print(f"[Step 1] Repetition detected (same line {max_consecutive_dupes}+ times), truncating.")
+                break
+        else:
+            dup_count = 0
+            last_line = stripped if stripped else last_line
+        result.append(line)
+    return "\n".join(result)
 
 
 def flatten_schema_text(schema_text: str) -> str:
@@ -575,13 +598,16 @@ Output compact JSON array. One object per line inside []. Example:
 
 
 def call_llm(
-    model,
-    tokenizer,
-    messages: List[Dict[str, str]],
-    max_new_tokens: int,
+    model=None,
+    tokenizer=None,
+    client=None,
+    model_name: Optional[str] = None,
+    messages: Optional[List[Dict[str, str]]] = None,
+    max_new_tokens: int = 4096,
     device: str = "cuda",
     llm_call_count: Optional[List[int]] = None,
 ) -> str:
+    """LLM 호출. OpenAI API (client, model_name) 또는 HuggingFace (model, tokenizer) 지원."""
     requested_max_new_tokens = int(max_new_tokens)
     clamped_max_new_tokens = min(requested_max_new_tokens, MAX_LLM_NEW_TOKENS)
     if clamped_max_new_tokens != requested_max_new_tokens:
@@ -591,6 +617,18 @@ def call_llm(
                 clamped_max_new_tokens,
             )
         )
+
+    if client is not None and model_name:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            max_tokens=clamped_max_new_tokens,
+            temperature=0,
+        )
+        if llm_call_count is not None:
+            llm_call_count[0] += 1
+        content = response.choices[0].message.content if response.choices else ""
+        return (content or "").strip()
 
     model_inputs = tokenizer.apply_chat_template(
         messages,
@@ -616,7 +654,7 @@ def call_llm(
         max_new_tokens=clamped_max_new_tokens,
         do_sample=False,
         pad_token_id=tokenizer.pad_token_id,
-        repetition_penalty=1.1,
+        repetition_penalty=1.3,
     )
     if llm_call_count is not None:
         llm_call_count[0] += 1
@@ -624,10 +662,12 @@ def call_llm(
 
 
 def call_llm_until_valid_json(
-    model,
-    tokenizer,
-    messages: List[Dict[str, str]],
-    max_new_tokens: int,
+    model=None,
+    tokenizer=None,
+    client=None,
+    model_name: Optional[str] = None,
+    messages: Optional[List[Dict[str, str]]] = None,
+    max_new_tokens: int = 4096,
     *,
     step_name: str,
     json_retry_attempts: int = 0,
@@ -654,6 +694,8 @@ def call_llm_until_valid_json(
         text = call_llm(
             model=model,
             tokenizer=tokenizer,
+            client=client,
+            model_name=model_name,
             messages=messages,
             max_new_tokens=attempt_max_new_tokens,
             device=device,
@@ -999,14 +1041,17 @@ def build_schema_topic_words(schema_topics: Any) -> List[Dict[str, Any]]:
 
 
 def _run_step3_chunked_retry(
-    model,
-    tokenizer,
-    surviving_topics: List[Dict[str, Any]],
-    step2_misc_topics: List[Dict[str, Any]],
-    schema_text: str,
-    max_new_tokens: int,
-    json_retry_attempts: int,
-    device: str,
+    model=None,
+    tokenizer=None,
+    client=None,
+    model_name: Optional[str] = None,
+    use_openai: bool = False,
+    surviving_topics: Optional[List[Dict[str, Any]]] = None,
+    step2_misc_topics: Optional[List[Dict[str, Any]]] = None,
+    schema_text: str = "",
+    max_new_tokens: int = 4096,
+    json_retry_attempts: int = 0,
+    device: str = "cuda",
     llm_call_count: Optional[List[int]] = None,
 ) -> tuple:
     """
@@ -1034,6 +1079,8 @@ def _run_step3_chunked_retry(
         chunk_text, chunk_json = call_llm_until_valid_json(
             model=model,
             tokenizer=tokenizer,
+            client=client,
+            model_name=model_name if use_openai else None,
             messages=step3_messages,
             max_new_tokens=max_new_tokens,
             step_name=f"Step 3 (chunk {chunk_idx + 1}/{len(chunks)})",
@@ -1069,30 +1116,41 @@ def run_llm_four_step_schema_pipeline(
 
     t0 = time.perf_counter()
     llm_call_count = [0]
+    use_openai = _is_openai_model(model_name)
 
-    print("Loading LLM:", model_name)
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    dtype = torch.float16 if device.startswith("cuda") else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-        torch_dtype=dtype,
-    ).to(device)
-    model.eval()
-    print("LLM loaded.")
+    if use_openai:
+        if OpenAI is None:
+            raise ImportError("OpenAI API 사용 시 'pip install openai' 필요")
+        print("Using OpenAI API model:", model_name)
+        client = OpenAI()
+        model, tokenizer = None, None
+    else:
+        print("Loading LLM (HuggingFace):", model_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        dtype = torch.float16 if device.startswith("cuda") else torch.float32
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            torch_dtype=dtype,
+        ).to(device)
+        model.eval()
+        client = None
+        print("LLM loaded.")
 
     step1_messages = build_schema_prompt(topic_words)
     step1_text = call_llm(
         model=model,
         tokenizer=tokenizer,
+        client=client,
+        model_name=model_name if use_openai else None,
         messages=step1_messages,
         max_new_tokens=max_new_tokens_step1,
         device=device,
         llm_call_count=llm_call_count,
     )
+    step1_text = truncate_schema_step1_repetition(step1_text)
     step1_text = flatten_schema_text(step1_text)
     check_schema_step1_flat(step1_text)
     schema_labels_step1 = parse_schema_labels(step1_text)
@@ -1111,6 +1169,8 @@ def run_llm_four_step_schema_pipeline(
     step2_text, step2_json = call_llm_until_valid_json(
         model=model,
         tokenizer=tokenizer,
+        client=client,
+        model_name=model_name if use_openai else None,
         messages=step2_messages,
         max_new_tokens=max_new_tokens_step2,
         step_name="Step 2",
@@ -1155,6 +1215,8 @@ def run_llm_four_step_schema_pipeline(
         step3_text, step3_json = call_llm_until_valid_json(
             model=model,
             tokenizer=tokenizer,
+            client=client,
+            model_name=model_name if use_openai else None,
             messages=step3_messages,
             max_new_tokens=max_new_tokens_step3,
             step_name="Step 3",
@@ -1173,6 +1235,9 @@ def run_llm_four_step_schema_pipeline(
         step3_text, step3_json = _run_step3_chunked_retry(
             model=model,
             tokenizer=tokenizer,
+            client=client,
+            model_name=model_name if use_openai else None,
+            use_openai=use_openai,
             surviving_topics=surviving_topics,
             step2_misc_topics=step2_misc_topics,
             schema_text=step1_text,

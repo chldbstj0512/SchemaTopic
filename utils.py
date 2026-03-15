@@ -1,7 +1,7 @@
 """
 topic extraction 및 공통 helper 함수
-- get_topics, get_topic_coherence (C_V), get_topic_diversity, nearest_neighbors
-- Palmetto C_V (run_palmetto_cv) when jar + wikipedia_bd available
+- get_topics, get_topic_coherence (C_V), get_topic_coherence_metrics (C_V, NPMI, UCI, UMass), get_topic_diversity
+- Coherence 기본: Gensim. Palmetto 쓰려면 SCHEMATOPIC_USE_PALMETTO=1 + root_dir (jar, wikipedia_bd)
 """
 import json
 import os
@@ -100,12 +100,13 @@ def _read_tc(tc_content):
     return np.mean(tcs) if tcs else None
 
 
-def run_palmetto_cv(root_dir, topics, temp_folder=None, timeout_per_topic=90, topk=10):
+def run_palmetto_measure_batched(root_dir, topics, measure="C_V", temp_folder=None, timeout=600, topk=10):
     """
-    Palmetto C_V: 토픽당 한 줄씩 실행해 NPE 시에도 나머지 토픽 유지.
-    root_dir: palmetto jar, wikipedia_bd 있는 디렉터리
-    topics: list of list of str (각 토픽 상위 단어)
-    Returns: mean C_V or None
+    Palmetto로 단일 coherence measure 계산. **전체 토픽을 한 파일에 넣고 measure당 1회만** Java 호출.
+    (기존: 토픽당 1회 → N회. 배치: 1회) 훨씬 빠름.
+    measure: C_V, NPMI, UCI, UMass, C_P, C_A
+    timeout: 전체 실행 제한(초). 기본 600(10분).
+    Returns: mean coherence or None
     """
     jar = os.path.join(root_dir, "palmetto-0.1.5-exec.jar")
     wikipedia_bd = os.path.join(root_dir, "wikipedia_bd")
@@ -113,42 +114,58 @@ def run_palmetto_cv(root_dir, topics, temp_folder=None, timeout_per_topic=90, to
         return None
     out_dir = temp_folder or os.path.join(root_dir, "temp_tc_palmetto")
     os.makedirs(out_dir, exist_ok=True)
-    tcs = []
-    print("Computing topic coherence with Palmetto for {} topics...".format(len(topics)))
-    topic_iter = _progress(
-        enumerate(topics),
-        total=len(topics),
-        desc="Palmetto C_V",
-    )
-    for i, words in topic_iter:
-        line = " ".join(words[:topk]) if isinstance(words, (list, tuple)) else words
-        if isinstance(line, str) and not line.strip():
-            continue
-        single_path = os.path.join(out_dir, "topic_%d.txt" % i)
-        with open(single_path, "w") as f:
-            f.write(line.strip() + "\n")
-        try:
-            r = subprocess.run(
-                ["java", "-jar", jar, wikipedia_bd, "C_V", os.path.abspath(single_path)],
-                cwd=root_dir,
-                capture_output=True,
-                text=True,
-                timeout=timeout_per_topic,
-            )
-            if r.returncode == 0 and r.stdout:
-                val = _read_tc(r.stdout)
-                if val is not None:
-                    tcs.append(val)
-        except (subprocess.TimeoutExpired, Exception):
-            pass
-    if not tcs:
+    # 한 파일에 "한 줄에 한 토픽" (Palmetto 공식 포맷)
+    all_path = os.path.join(out_dir, "all_topics_%s.txt" % measure.replace(" ", "_"))
+    lines = []
+    for words in topics:
+        line = " ".join(words[:topk]) if isinstance(words, (list, tuple)) else (words if isinstance(words, str) else "")
+        if line and line.strip():
+            lines.append(line.strip())
+    if not lines:
         return None
-    return float(np.mean(tcs))
+    with open(all_path, "w") as f:
+        f.write("\n".join(lines))
+    try:
+        r = subprocess.run(
+            ["java", "-jar", jar, wikipedia_bd, measure, os.path.abspath(all_path)],
+            cwd=root_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if r.returncode == 0 and r.stdout:
+            return _read_tc(r.stdout)
+    except (subprocess.TimeoutExpired, Exception):
+        pass
+    return None
 
 
-def get_topic_coherence(beta, training_set, vocabulary, topk=10, n_docs_for_coherence=2000, root_dir=None):
+def run_palmetto_measure(root_dir, topics, measure="C_V", temp_folder=None, timeout_per_topic=90, topk=10):
     """
-    C_V: root_dir에 Palmetto(jar + wikipedia_bd) 있으면 Palmetto 사용, 없으면 gensim fallback.
+    Palmetto 단일 measure. **배치 방식** 사용 (measure당 Java 1회). 빠름.
+    timeout: 배치 1회당 상한(초). 기본 최대 10분.
+    """
+    batch_timeout = min(600, max(120, timeout_per_topic * max(1, len(topics))))
+    return run_palmetto_measure_batched(
+        root_dir, topics, measure=measure, temp_folder=temp_folder, timeout=batch_timeout, topk=topk
+    )
+
+
+def run_palmetto_cv(root_dir, topics, temp_folder=None, timeout_per_topic=90, topk=10):
+    """Palmetto C_V only. Kept for backward compatibility."""
+    return run_palmetto_measure(root_dir, topics, measure="C_V", temp_folder=temp_folder, timeout_per_topic=timeout_per_topic, topk=topk)
+
+
+# Palmetto measure names for C_V, NPMI, UCI, UMass (jar 3rd argument)
+PALMETTO_COHERENCE_MEASURES = ["C_V", "NPMI", "UCI", "UMass"]
+
+
+def get_topic_coherence_metrics(beta, training_set, vocabulary, topk=10, n_docs_for_coherence=2000, root_dir=None):
+    """
+    C_V, NPMI, UCI, UMass coherence를 모두 계산.
+    - **기본(default)**: Gensim 사용 (학습 코퍼스 기준, 빠름).
+    - Palmetto 사용하려면: root_dir에 jar + wikipedia_bd 두고 환경변수 SCHEMATOPIC_USE_PALMETTO=1 설정.
+    Returns: dict with keys topic_coherence_cv, topic_coherence_npmi, topic_coherence_uci, topic_coherence_umass
     """
     if torch.is_tensor(beta):
         beta = beta.detach().cpu().numpy()
@@ -156,33 +173,60 @@ def get_topic_coherence(beta, training_set, vocabulary, topk=10, n_docs_for_cohe
     topics = get_topics(beta, vocabulary, topk=topk)
     print("Preparing topic coherence evaluation for {} topics...".format(len(topics)))
 
-    if root_dir:
-        tc = run_palmetto_cv(root_dir, topics, topk=topk)
-        if tc is not None:
-            print("Topic Coherence (C_V, Palmetto):", round(tc, 4))
-            return float(tc)
+    out = {
+        "topic_coherence_cv": None,
+        "topic_coherence_npmi": None,
+        "topic_coherence_uci": None,
+        "topic_coherence_umass": None,
+    }
+
+    use_palmetto = os.environ.get("SCHEMATOPIC_USE_PALMETTO", "").strip().lower() in ("1", "true", "yes")
+    if use_palmetto and root_dir:
+        jar = os.path.join(root_dir, "palmetto-0.1.5-exec.jar")
+        wikipedia_bd = os.path.join(root_dir, "wikipedia_bd")
+        if os.path.isfile(jar) and os.path.isdir(wikipedia_bd):
+            print("Computing topic coherence with Palmetto (C_V, NPMI, UCI, UMass)...")
+            for measure in PALMETTO_COHERENCE_MEASURES:
+                val = run_palmetto_measure(root_dir, topics, measure=measure, topk=topk)
+                key = "topic_coherence_cv" if measure == "C_V" else "topic_coherence_npmi" if measure == "NPMI" else "topic_coherence_uci" if measure == "UCI" else "topic_coherence_umass"
+                out[key] = float(val) if val is not None else None
+            for k, v in out.items():
+                if v is not None:
+                    print("  %s: %s" % (k, round(v, 4)))
+            return out
 
     try:
         from gensim.models import CoherenceModel
     except ImportError:
-        print("gensim not installed; skipping C_V coherence.")
-        return 0.0
+        print("gensim not installed; skipping coherence metrics.")
+        return {k: 0.0 for k in out}
 
-    print(
-        "Palmetto unavailable; falling back to gensim C_V on up to {} documents.".format(
-            n_docs_for_coherence,
-        )
-    )
+    print("Computing topic coherence with Gensim (default, up to %d documents)." % n_docs_for_coherence)
     texts = _bow_to_texts(training_set, vocabulary, max_docs=n_docs_for_coherence)
-    try:
-        print("Running gensim CoherenceModel...")
-        cm = CoherenceModel(topics=topics, texts=texts, coherence="c_v")
-        score = cm.get_coherence()
-    except Exception as e:
-        print("CoherenceModel error:", e)
-        return 0.0
-    print("Topic Coherence (C_V, gensim):", round(score, 4))
-    return float(score)
+    for coherence_type, key in [
+        ("c_v", "topic_coherence_cv"),
+        ("c_npmi", "topic_coherence_npmi"),
+        ("c_uci", "topic_coherence_uci"),
+        ("u_mass", "topic_coherence_umass"),
+    ]:
+        try:
+            cm = CoherenceModel(topics=topics, texts=texts, coherence=coherence_type)
+            out[key] = float(cm.get_coherence())
+            print("  %s (gensim): %s" % (key, round(out[key], 4)))
+        except Exception as e:
+            print("  %s: failed (%s)" % (key, e))
+    return out
+
+
+def get_topic_coherence(beta, training_set, vocabulary, topk=10, n_docs_for_coherence=2000, root_dir=None):
+    """
+    C_V만 반환 (기존 API 호환). 내부적으로 get_topic_coherence_metrics 사용.
+    """
+    metrics = get_topic_coherence_metrics(
+        beta, training_set, vocabulary, topk=topk, n_docs_for_coherence=n_docs_for_coherence, root_dir=root_dir
+    )
+    cv = metrics.get("topic_coherence_cv")
+    return float(cv) if cv is not None else 0.0
 
 
 def get_topic_diversity(beta, topk=25):

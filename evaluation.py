@@ -1,8 +1,8 @@
 """
-topic coherence (C_V), topic diversity, clustering 성능 (Purity, NMI)
+Topic coherence (C_V, NPMI, UCI, UMass), topic diversity (TD), clustering (Purity, NMI).
 """
 import numpy as np
-from utils import get_topic_coherence, get_topic_diversity, get_topics
+from utils import get_topic_coherence_metrics, get_topic_diversity, get_topics
 
 
 def compute_purity_nmi(theta, labels, num_topics):
@@ -56,16 +56,16 @@ def compute_purity_nmi(theta, labels, num_topics):
 def run_evaluation(beta, theta_test, train_bow, test_labels,
                    vocab, num_topics, topk_words=10, n_docs_coherence=2000, root_dir=None):
     """
-    TC (C_V), TD, (Purity + NMI)/2 계산.
-    root_dir: Palmetto jar + wikipedia_bd 경로 (있으면 C_V에 Palmetto 사용)
+    Coherence (C_V, NPMI, UCI, UMass), TD, Purity, NMI, PN 계산.
+    root_dir: Palmetto jar + wikipedia_bd 경로 (있으면 Palmetto로 4가지 coherence)
     """
     if hasattr(beta, "detach"):
         beta_np = beta.detach().cpu().numpy()
     else:
         beta_np = np.asarray(beta)
 
-    print("\n[Evaluation] Starting topic coherence / diversity / clustering metrics...")
-    tc = get_topic_coherence(
+    print("\n[Evaluation] Starting topic coherence (C_V, NPMI, UCI, UMass) / diversity / clustering...")
+    coherence_metrics = get_topic_coherence_metrics(
         beta_np, train_bow, vocab,
         topk=topk_words, n_docs_for_coherence=n_docs_coherence,
         root_dir=root_dir,
@@ -84,13 +84,15 @@ def run_evaluation(beta, theta_test, train_bow, test_labels,
     print("PN (Purity+NMI)/2:", round(pn, 4))
     print("[Evaluation] All metrics finished.\n")
 
-    return {
-        "topic_coherence_cv": tc,
+    result = {
         "topic_diversity": td,
         "purity": purity,
         "nmi": nmi,
         "PN": pn,
     }
+    for k, v in coherence_metrics.items():
+        result[k] = v if v is not None else 0.0
+    return result
 
 
 def get_top_words_per_topic(beta, vocab, topk=15):
